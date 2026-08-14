@@ -1,0 +1,1496 @@
+# ==============================================================================
+# PhishGuard_AI - Adversarial & Evasion Robustness Gates Specification
+# Version: 13.0.0
+# File Path: mlops_pipeline/configs/evaluation/adversarial_gates.yaml
+#
+# Purpose
+# -------
+# Production adversarial-security contract for URL, email, and attachment
+# threat-detection models.
+#
+# Evaluation lifecycle
+# --------------------
+# clean holdout
+#      |
+#      +--> controlled mutation
+#      |       |
+#      |       +--> attack validity
+#      |       +--> semantic preservation
+#      |       +--> attack success
+#      |       +--> robustness metrics
+#      |
+#      +--> framework inference
+#      +--> ONNX inference
+#      +--> quantized ONNX inference
+#      |
+#      +--> statistical gates
+#      +--> per-attack gates
+#      +--> aggregate gates
+#      +--> promotion decision
+#
+# Security model
+# --------------
+# This file defines EVALUATION POLICY only.
+#
+# It does NOT contain:
+# - exploit payloads
+# - malware
+# - credentials
+# - API keys
+# - private keys
+# - raw production traffic
+# - raw customer payloads
+# - attack infrastructure
+#
+# The attack engines referenced below must operate only against isolated,
+# synthetic, sanitized, or explicitly authorized evaluation datasets.
+#
+# IMPORTANT
+# ---------
+# All versions in the current project are standardized to 13.0.0.
+# ==============================================================================
+
+
+schema:
+  schema_version: "1.0.0"
+  config_version: "13.0.0"
+  gate_contract_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_missing_required_fields: true
+    reject_duplicate_attack_ids: true
+    reject_duplicate_metric_names: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    maximum_pipeline_version: "13.x"
+    evaluation_engine_version: "1.0.0"
+    minimum_evaluation_engine_version: "1.0.0"
+    inference_contract_version: "1.0.0"
+
+  validation:
+    require_unique_model_ids: true
+    require_unique_attack_ids: true
+    require_explicit_attack_budget: true
+    require_explicit_dataset_binding: true
+    require_explicit_seed: true
+    require_artifact_hashes: true
+
+
+# ==============================================================================
+# 1. ADVERSARIAL EVALUATION POLICY
+# ==============================================================================
+
+adversarial_policy:
+
+  policy_id: "global_adversarial_gate_v13"
+
+  version: "13.0.0"
+
+  purpose:
+    - "evasion_robustness"
+    - "input_manipulation_resilience"
+    - "distribution_shift_resilience"
+    - "model_integrity_validation"
+    - "deployment_artifact_validation"
+
+  required_for:
+    development: false
+    test: true
+    staging: true
+    production: true
+
+  failure_mode: "fail_closed"
+
+  quarantine:
+    enabled: true
+    quarantine_on_failure: true
+    quarantine_on_invalid_attack: true
+    quarantine_on_statistical_failure: true
+    quarantine_on_artifact_mismatch: true
+    quarantine_directory: "artifacts/quarantine/failed_adversarial_evaluations"
+
+  promotion_blocking:
+    block_on_any_critical_failure: true
+    block_on_aggregate_failure: true
+    block_on_attack_validity_failure: true
+    block_on_artifact_parity_failure: true
+    block_on_insufficient_samples: true
+    block_on_missing_attack_family: true
+
+
+# ==============================================================================
+# 2. DATASET ISOLATION & EVALUATION INTEGRITY
+# ==============================================================================
+
+dataset:
+
+  clean_holdout:
+    required: true
+    dataset_id: "adversarial_clean_holdout_v13"
+
+    purpose: >
+      Clean reference dataset from which paired adversarial examples are
+      generated.
+
+    allowed_splits:
+      - "dedicated_adversarial_holdout"
+
+    forbidden_splits:
+      - "training"
+      - "feedback_queue"
+      - "production"
+      - "threshold_optimization"
+
+    require_unseen_from_training: true
+    require_unseen_from_threshold_selection: true
+    require_unseen_from_calibration: true
+
+  adversarial_holdout:
+    required: true
+    dataset_id: "adversarial_holdout_v13"
+
+    immutable: true
+
+    require_manifest: true
+    require_sha256_manifest: true
+
+    require_sample_ids: true
+    require_parent_sample_id: true
+
+  contamination_prevention:
+    enabled: true
+
+    prohibit_training_reuse: true
+    prohibit_validation_reuse_for_attack_tuning: true
+    prohibit_test_reuse_for_attack_parameter_search: true
+
+    attack_parameter_tuning_dataset:
+      allowed: "dedicated_attack_dev_set"
+      forbidden:
+        - "test"
+        - "production"
+        - "adversarial_holdout"
+
+  production_traffic:
+    allowed: false
+    prohibit_live_generation: true
+    prohibit_live_attack_execution: true
+    prohibit_live_payload_mutation: true
+
+
+# ==============================================================================
+# 3. REPRODUCIBILITY
+# ==============================================================================
+
+reproducibility:
+
+  enabled: true
+
+  master_seed: 42
+
+  deterministic_generation: true
+
+  deterministic_inference: true
+
+  deterministic_preprocessing: true
+
+  repeat_trials:
+    enabled: true
+    number_of_trials: 3
+    seeds:
+      - 42
+      - 43
+      - 44
+
+  require_attack_seed_record: true
+
+  require_environment_capture:
+    python_version: true
+    framework_version: true
+    tokenizer_version: true
+    attack_engine_version: true
+    operating_system: true
+    cpu_info: true
+    gpu_info: true
+    dependency_lock_hash: true
+    git_commit: true
+    git_dirty_state: true
+
+  reproducibility_failure:
+    action: "fail_closed"
+
+
+# ==============================================================================
+# 4. ATTACKER CAPABILITY MODEL
+# ==============================================================================
+
+attacker_models:
+
+  black_box:
+    enabled: true
+    knowledge:
+      model_architecture: false
+      gradients: false
+      parameters: false
+      confidence_scores: false
+
+  gray_box:
+    enabled: true
+    knowledge:
+      model_architecture: true
+      gradients: false
+      parameters: false
+      confidence_scores: true
+
+  white_box:
+    enabled: true
+    knowledge:
+      model_architecture: true
+      gradients: true
+      parameters: true
+      confidence_scores: true
+
+  transfer:
+    enabled: true
+
+    purpose: >
+      Evaluate whether adversarial examples generated against a surrogate or
+      alternate model transfer to the production candidate.
+
+    require_independent_surrogate: true
+    surrogate_must_not_be_training_copy: true
+
+
+# ==============================================================================
+# 5. GLOBAL ATTACK VALIDITY CONTRACT
+# ==============================================================================
+
+attack_validity:
+
+  enabled: true
+
+  require_paired_samples: true
+
+  parent_child_relationship:
+    require_parent_sample_id: true
+    require_one_to_many_tracking: true
+
+  semantic_preservation:
+    enabled: true
+
+    require_label_preservation: true
+
+    minimum_semantic_similarity:
+      email: 0.90
+      url: 0.95
+      attachment: 0.99
+
+  mutation_constraints:
+
+    max_changed_character_ratio:
+      email: 0.20
+      url: 0.15
+      attachment: 0.10
+
+    max_changed_token_ratio:
+      email: 0.20
+      url: 0.15
+      attachment: 0.10
+
+  invalid_attack_conditions:
+
+    reject_if_label_changes: true
+    reject_if_parser_fails_unexpectedly: true
+    reject_if_input_contract_changes: true
+    reject_if_file_corruption_is_unintended: true
+    reject_if_mutation_exceeds_budget: true
+    reject_if_attack_generates_duplicate_sample: true
+
+  invalid_attack_rate:
+
+    maximum_allowed: 0.02
+
+    confidence_level: 0.99
+
+    fail_if_exceeded: true
+
+
+# ==============================================================================
+# 6. GLOBAL ADVERSARIAL METRICS
+# ==============================================================================
+
+metrics:
+
+  primary:
+    - "attack_success_rate"
+    - "adversarial_recall"
+    - "adversarial_precision"
+    - "adversarial_pr_auc"
+    - "adversarial_fpr"
+
+  degradation:
+    - "recall_drop"
+    - "precision_drop"
+    - "pr_auc_drop"
+    - "roc_auc_drop"
+    - "fpr_increase"
+    - "f1_drop"
+
+  robustness:
+    - "robust_accuracy"
+    - "prediction_flip_rate"
+    - "confidence_shift"
+    - "calibration_shift"
+
+  statistical:
+    - "bootstrap_confidence_interval"
+    - "paired_difference_confidence_interval"
+    - "permutation_test"
+    - "mcnemar_test"
+
+  confidence:
+    level: 0.99
+
+  bootstrap:
+    enabled: true
+    samples: 5000
+    method: "percentile"
+    random_seed: 42
+
+  paired_testing:
+    enabled: true
+    require_paired_samples: true
+    preferred_method: "bootstrap"
+
+  multiple_comparisons:
+    enabled: true
+    correction: "holm_bonferroni"
+    family_wise_error_rate: 0.01
+
+
+# ==============================================================================
+# 7. GLOBAL ADVERSARIAL GATES
+# ==============================================================================
+
+global_gates:
+
+  maximum_pr_auc_drop: 0.0400
+
+  maximum_roc_auc_drop: 0.0300
+
+  maximum_recall_drop: 0.0400
+
+  maximum_precision_drop: 0.0300
+
+  maximum_f1_drop: 0.0400
+
+  maximum_fpr_increase: 0.0010
+
+  maximum_prediction_flip_rate: 0.0500
+
+  maximum_confidence_shift: 0.1000
+
+  minimum_attack_validity_rate: 0.9800
+
+  maximum_attack_success_rate:
+    severity:
+      critical: 0.0500
+      high: 0.1000
+      medium: 0.2000
+
+  statistical_requirements:
+    confidence_level: 0.99
+    lower_bound_must_pass: true
+
+  critical_failure:
+    fail_closed: true
+
+
+# ==============================================================================
+# 8. EMAIL CLASSIFIER
+# ==============================================================================
+
+models:
+
+  email_classifier:
+
+    enabled: true
+
+    model_id: "email_classifier"
+
+    operating_threshold:
+      source: "validated_threshold"
+      fallback: 0.9000
+      forbid_unvalidated_threshold: true
+
+    minimum_attack_samples:
+      total: 2500
+      per_attack: 250
+      per_attack_family: 500
+
+    global_limits:
+
+      max_pr_auc_drop: 0.0400
+      max_roc_auc_drop: 0.0300
+      max_recall_drop: 0.0400
+      max_fpr_increase: 0.0010
+
+      min_adversarial_recall: 0.9000
+      min_adversarial_precision: 0.9850
+      min_adversarial_pr_auc: 0.9000
+
+      max_attack_success_rate: 0.1000
+
+    attack_families:
+
+      unicode_obfuscation:
+        required: true
+
+      html_structural_evasion:
+        required: true
+
+      semantic_text_mutation:
+        required: true
+
+      header_metadata_evasion:
+        required: true
+
+      adaptive_black_box:
+        required: true
+
+
+    attacks:
+
+      zero_width_character_injection:
+        enabled: true
+        attack_id: "email_unicode_zero_width_v13"
+        family: "unicode_obfuscation"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "invisible_unicode_insertion"
+
+        mutation_budget:
+          maximum_insertion_ratio: 0.05
+          maximum_insertions: 100
+
+        semantic_preservation:
+          required: true
+          minimum_similarity: 0.95
+
+        max_recall_drop: 0.0200
+        max_fpr_increase: 0.0005
+
+        minimum_samples: 250
+
+
+      homoglyph_unicode_substitution:
+        enabled: true
+        attack_id: "email_homoglyph_v13"
+        family: "unicode_obfuscation"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "unicode_lookalike_substitution"
+
+        mutation_budget:
+          maximum_substitution_ratio: 0.10
+
+        semantic_preservation:
+          required: true
+          minimum_similarity: 0.93
+
+        max_recall_drop: 0.0250
+
+        minimum_samples: 250
+
+
+      invisible_html_padding:
+        enabled: true
+        attack_id: "email_html_padding_v13"
+        family: "html_structural_evasion"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "non_visible_html_mutation"
+
+        mutation_budget:
+          maximum_added_bytes: 100000
+
+        max_recall_drop: 0.0300
+
+        minimum_samples: 250
+
+
+      semantic_text_mutation:
+        enabled: true
+        attack_id: "email_semantic_mutation_v13"
+        family: "semantic_text_mutation"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "constrained_semantic_rewrite"
+
+        constraints:
+          maximum_modified_token_ratio: 0.15
+          minimum_semantic_similarity: 0.90
+
+        max_recall_drop: 0.0400
+
+        minimum_samples: 250
+
+
+      header_consistency_evasion:
+        enabled: true
+        attack_id: "email_header_consistency_v13"
+        family: "header_metadata_evasion"
+        severity: "critical"
+        attacker_model: "gray_box"
+
+        technique: "metadata_consistency_mutation"
+
+        preserve_message_identity: true
+
+        max_recall_drop: 0.0300
+        max_fpr_increase: 0.0005
+
+        minimum_samples: 250
+
+
+      adaptive_black_box:
+        enabled: true
+        attack_id: "email_adaptive_black_box_v13"
+        family: "adaptive_black_box"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        query_budget:
+          maximum_queries_per_sample: 100
+
+        objective:
+          target: "reduce_malicious_probability"
+          preserve_semantics: true
+
+        max_attack_success_rate: 0.1000
+
+        minimum_samples: 250
+
+
+# ==============================================================================
+# 9. URL CLASSIFIER
+# ==============================================================================
+
+  url_classifier:
+
+    enabled: true
+
+    model_id: "url_classifier"
+
+    operating_threshold:
+      source: "validated_threshold"
+      fallback: 0.8500
+      forbid_unvalidated_threshold: true
+
+    minimum_attack_samples:
+      total: 2500
+      per_attack: 250
+      per_attack_family: 500
+
+    global_limits:
+
+      max_pr_auc_drop: 0.0350
+      max_roc_auc_drop: 0.0300
+      max_recall_drop: 0.0350
+      max_fpr_increase: 0.0010
+
+      min_adversarial_recall: 0.9250
+      min_adversarial_precision: 0.9800
+
+      max_attack_success_rate: 0.1000
+
+    attack_families:
+
+      unicode_domain_evasion:
+        required: true
+
+      hostname_obfuscation:
+        required: true
+
+      path_obfuscation:
+        required: true
+
+      redirect_evasion:
+        required: true
+
+      adaptive_black_box:
+        required: true
+
+
+    attacks:
+
+      idn_homograph:
+        enabled: true
+        attack_id: "url_idn_homograph_v13"
+        family: "unicode_domain_evasion"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        technique: "idn_lookalike_mutation"
+
+        semantic_preservation:
+          required: true
+          minimum_similarity: 0.98
+
+        max_recall_drop: 0.0200
+
+        minimum_samples: 250
+
+
+      subdomain_stacking:
+        enabled: true
+        attack_id: "url_subdomain_stacking_v13"
+        family: "hostname_obfuscation"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "subdomain_structure_mutation"
+
+        mutation_budget:
+          maximum_subdomain_depth: 6
+
+        max_recall_drop: 0.0250
+
+        minimum_samples: 250
+
+
+      host_encoding_mutation:
+        enabled: true
+        attack_id: "url_host_encoding_v13"
+        family: "hostname_obfuscation"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        technique: "alternate_host_representation"
+
+        allowed_representations:
+          - "canonicalized_equivalent_host"
+          - "encoded_host"
+
+        max_recall_drop: 0.0150
+
+        minimum_samples: 250
+
+
+      redirect_chain_simulation:
+        enabled: true
+        attack_id: "url_redirect_chain_v13"
+        family: "redirect_evasion"
+        severity: "high"
+        attacker_model: "black_box"
+
+        maximum_redirect_hops: 5
+
+        max_recall_drop: 0.0300
+
+        minimum_samples: 250
+
+
+      character_mutation:
+        enabled: true
+        attack_id: "url_character_mutation_v13"
+        family: "path_obfuscation"
+        severity: "high"
+        attacker_model: "black_box"
+
+        mutation_budget:
+          maximum_character_edits: 3
+          maximum_edit_ratio: 0.10
+
+        semantic_preservation:
+          required: true
+          minimum_similarity: 0.95
+
+        max_recall_drop: 0.0350
+
+        minimum_samples: 250
+
+
+      adaptive_black_box:
+        enabled: true
+        attack_id: "url_adaptive_black_box_v13"
+        family: "adaptive_black_box"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        query_budget:
+          maximum_queries_per_sample: 100
+
+        max_attack_success_rate: 0.1000
+
+        minimum_samples: 250
+
+
+# ==============================================================================
+# 10. ATTACHMENT CLASSIFIER
+# ==============================================================================
+
+  attachment_classifier:
+
+    enabled: true
+
+    model_id: "attachment_classifier"
+
+    operating_threshold:
+      source: "validated_threshold"
+      fallback: 0.9500
+      forbid_unvalidated_threshold: true
+
+    minimum_attack_samples:
+      total: 2500
+      per_attack: 250
+      per_attack_family: 500
+
+    global_limits:
+
+      max_pr_auc_drop: 0.0400
+      max_roc_auc_drop: 0.0300
+      max_recall_drop: 0.0400
+      max_fpr_increase: 0.0005
+
+      min_adversarial_recall: 0.8900
+      min_adversarial_precision: 0.9900
+
+      max_attack_success_rate: 0.1000
+
+    attack_families:
+
+      byte_structure_evasion:
+        required: true
+
+      document_structure_evasion:
+        required: true
+
+      script_obfuscation:
+        required: true
+
+      archive_structure_evasion:
+        required: true
+
+      parser_boundary_testing:
+        required: true
+
+
+    attacks:
+
+      benign_overlay_padding:
+        enabled: true
+        attack_id: "attachment_overlay_padding_v13"
+        family: "byte_structure_evasion"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "controlled_file_overlay_mutation"
+
+        mutation_budget:
+          maximum_added_size_mb: 5.0
+
+        preserve_file_openability: true
+
+        max_recall_drop: 0.0200
+
+        minimum_samples: 250
+
+
+      structural_metadata_mutation:
+        enabled: true
+        attack_id: "attachment_structure_mutation_v13"
+        family: "document_structure_evasion"
+        severity: "high"
+        attacker_model: "black_box"
+
+        technique: "metadata_structure_preserving_mutation"
+
+        preserve_semantics: true
+
+        max_recall_drop: 0.0250
+
+        minimum_samples: 250
+
+
+      script_obfuscation:
+        enabled: true
+        attack_id: "attachment_script_obfuscation_v13"
+        family: "script_obfuscation"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        technique: "semantics_preserving_script_mutation"
+
+        mutation_budget:
+          maximum_token_change_ratio: 0.15
+
+        preserve_execution_semantics: true
+
+        max_recall_drop: 0.0350
+
+        minimum_samples: 250
+
+
+      nested_container_mutation:
+        enabled: true
+        attack_id: "attachment_nested_container_v13"
+        family: "archive_structure_evasion"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        technique: "controlled_container_wrapping"
+
+        safety_limits:
+          maximum_nesting_levels: 4
+          maximum_expanded_size_multiplier: 20
+          maximum_extracted_files: 100
+
+        max_recall_drop: 0.0300
+
+        minimum_samples: 250
+
+
+      parser_boundary_testing:
+        enabled: true
+        attack_id: "attachment_parser_boundary_v13"
+        family: "parser_boundary_testing"
+        severity: "critical"
+        attacker_model: "black_box"
+
+        technique: "malformed_but_bounded_input_variation"
+
+        safety_limits:
+          maximum_file_size_mb: 50
+          maximum_processing_time_seconds: 30
+          prohibit_system_calls: true
+          prohibit_network_access: true
+          isolated_sandbox_required: true
+
+        gate:
+          maximum_unexpected_crash_rate: 0.001
+          maximum_timeout_rate: 0.005
+          maximum_memory_exhaustion_rate: 0.0001
+
+        minimum_samples: 250
+
+
+# ==============================================================================
+# 11. ADAPTIVE / GRADIENT ROBUSTNESS
+# ==============================================================================
+
+adaptive_testing:
+
+  enabled: true
+
+  required_for_production: true
+
+  purpose: >
+    Detect robustness failures that ordinary fixed perturbation suites may miss.
+
+  gradient_attacks:
+
+    enabled_for_gradient_access_models: true
+
+    require_real_gradient_path: true
+
+    require_gradient_sanity_check: true
+
+    prohibit_false_gradient_evaluation: true
+
+    evaluation_only:
+      max_samples_per_model: 500
+
+    safety:
+      isolated_environment: true
+      no_network_access: true
+
+  black_box_attacks:
+
+    enabled: true
+
+    require_query_budget: true
+
+    require_query_logging: true
+
+    maximum_queries_per_sample: 100
+
+    maximum_total_queries: 250000
+
+  adaptive_attack_gate:
+
+    maximum_attack_success_rate: 0.1000
+
+    maximum_recall_drop: 0.0500
+
+    confidence_level: 0.99
+
+
+# ==============================================================================
+# 12. TRANSFERABILITY TESTING
+# ==============================================================================
+
+transfer_testing:
+
+  enabled: true
+
+  required_for_production: true
+
+  purpose:
+    >
+      Detect attacks that transfer from independently implemented or differently
+      trained surrogate models to the production candidate.
+
+  surrogate_models:
+    minimum_count: 2
+    require_architecture_diversity: true
+    require_training_seed_diversity: true
+
+  gate:
+
+    maximum_transfer_attack_success_rate: 0.1000
+
+    maximum_recall_drop: 0.0500
+
+    confidence_level: 0.99
+
+
+# ==============================================================================
+# 13. CLEAN-vs-ADVERSARIAL PAIRED ANALYSIS
+# ==============================================================================
+
+paired_analysis:
+
+  enabled: true
+
+  required_for_production: true
+
+  require_same_parent_sample: true
+
+  metrics:
+
+    prediction_flip:
+      enabled: true
+      maximum_rate: 0.0500
+
+    confidence_drop:
+      enabled: true
+      maximum_mean_drop: 0.1000
+
+    probability_shift:
+      enabled: true
+      maximum_absolute_shift: 0.1500
+
+  paired_statistical_test:
+
+    enabled: true
+
+    method: "bootstrap"
+
+    samples: 5000
+
+    confidence_level: 0.99
+
+    require_lower_confidence_bound_to_pass: true
+
+
+# ==============================================================================
+# 14. ONNX ADVERSARIAL PARITY
+# ==============================================================================
+
+onnx_validation:
+
+  enabled: true
+
+  required_for_production: true
+
+  compare:
+
+    framework_vs_raw_onnx: true
+    framework_vs_optimized_onnx: true
+    framework_vs_quantized_onnx: true
+
+  numerical_parity:
+
+    probability_rtol: 0.001
+    probability_atol: 0.0001
+
+  adversarial_parity:
+
+    maximum_prediction_disagreement_rate: 0.001
+
+    maximum_threshold_decision_disagreement_rate: 0.001
+
+    require_same_attack_set: true
+
+  quantized_model:
+
+    enabled: true
+
+    maximum_pr_auc_drop: 0.005
+
+    maximum_recall_drop: 0.005
+
+    maximum_fpr_increase: 0.0002
+
+    production_required: true
+
+
+# ==============================================================================
+# 15. ATTACK COVERAGE REQUIREMENTS
+# ==============================================================================
+
+coverage:
+
+  enabled: true
+
+  minimum_attack_families_per_model: 5
+
+  minimum_enabled_attacks_per_model: 5
+
+  require_critical_attack_families: true
+
+  require_black_box_testing: true
+
+  require_adaptive_testing: true
+
+  require_transfer_testing: true
+
+  require_clean_paired_testing: true
+
+  coverage_failure:
+    action: "fail_closed"
+
+
+# ==============================================================================
+# 16. SEVERITY POLICY
+# ==============================================================================
+
+severity_policy:
+
+  critical:
+
+    failure_action: "block_promotion"
+
+    examples:
+      - "high_attack_success_rate"
+      - "critical_slice_failure"
+      - "artifact_prediction_disagreement"
+      - "parser_crash"
+      - "memory_exhaustion"
+      - "unbounded_attack_generation"
+      - "invalid_attack_contamination"
+
+  high:
+
+    failure_action: "block_production"
+
+  medium:
+
+    failure_action: "require_review"
+
+  low:
+
+    failure_action: "record_and_monitor"
+
+
+# ==============================================================================
+# 17. RESOURCE & SAFETY LIMITS
+# ==============================================================================
+
+execution_safety:
+
+  sandbox:
+
+    required: true
+
+    network_access: false
+
+    internet_access: false
+
+    host_filesystem_access: false
+
+    privileged_execution: false
+
+    container_escape_protection: true
+
+  process_limits:
+
+    maximum_runtime_seconds: 3600
+
+    maximum_cpu_seconds: 7200
+
+    maximum_memory_gb: 16
+
+    maximum_workers: 4
+
+  attachment_tests:
+
+    maximum_input_size_mb: 50
+
+    maximum_extraction_depth: 5
+
+    maximum_extracted_files: 100
+
+    maximum_expanded_size_gb: 1
+
+    maximum_parser_runtime_seconds: 30
+
+  email_tests:
+
+    maximum_message_size_mb: 25
+
+    maximum_body_characters: 1000000
+
+    maximum_html_size_mb: 10
+
+  url_tests:
+
+    maximum_url_length: 8192
+
+    maximum_redirect_hops: 5
+
+  resource_exhaustion:
+
+    fail_on_timeout_spike: true
+    fail_on_memory_exhaustion: true
+    fail_on_cpu_exhaustion: true
+
+
+# ==============================================================================
+# 18. INPUT CONTRACT ROBUSTNESS
+# ==============================================================================
+
+input_contract_testing:
+
+  enabled: true
+
+  required_for_production: true
+
+  tests:
+
+    missing_fields:
+      enabled: true
+      expected_action: "reject"
+
+    unknown_fields:
+      enabled: true
+      expected_action: "reject"
+
+    wrong_data_types:
+      enabled: true
+      expected_action: "reject"
+
+    nan_values:
+      enabled: true
+      expected_action: "reject"
+
+    infinity_values:
+      enabled: true
+      expected_action: "reject"
+
+    oversized_inputs:
+      enabled: true
+      expected_action: "reject"
+
+    malformed_unicode:
+      enabled: true
+      expected_action: "sanitize_or_reject"
+
+  fail_open_prohibited: true
+
+
+# ==============================================================================
+# 19. MODEL INTEGRITY / POISONING SCREEN
+# ==============================================================================
+
+integrity_screen:
+
+  enabled: true
+
+  required_for_production: true
+
+  purpose: >
+    Evasion testing does not prove model integrity. A separate integrity screen
+    is required to detect suspicious training or artifact behavior before
+    promotion.
+
+  dataset_integrity:
+
+    require_dataset_manifest: true
+
+    require_dataset_hash: true
+
+    require_label_distribution_check: true
+
+    require_duplicate_check: true
+
+    require_near_duplicate_check: true
+
+    require_train_test_isolation: true
+
+  model_integrity:
+
+    require_artifact_hash: true
+
+    require_reproducible_build_metadata: true
+
+    require_dependency_lock: true
+
+    require_model_signature: true
+
+  backdoor_screen:
+
+    enabled: true
+
+    required_for_production: true
+
+    require_trigger_suite: true
+
+    maximum_trigger_success_rate: 0.0100
+
+    fail_on_unexplained_trigger_behavior: true
+
+
+# ==============================================================================
+# 20. REPORTING
+# ==============================================================================
+
+reporting:
+
+  enabled: true
+
+  generate_json_summary: true
+
+  generate_markdown_report: true
+
+  generate_attack_matrix: true
+
+  generate_per_attack_metrics: true
+
+  generate_per_family_metrics: true
+
+  generate_confidence_intervals: true
+
+  generate_failed_sample_manifest: true
+
+  output_directory: "artifacts/reports/adversarial_gates"
+
+  report_filenames:
+
+    summary_json: "adversarial_summary.json"
+
+    detailed_markdown: "adversarial_report.md"
+
+    gate_status: "adversarial_gate_status.json"
+
+    attack_matrix: "attack_matrix.json"
+
+    failed_samples: "failed_attack_samples.json"
+
+    provenance: "adversarial_provenance.json"
+
+  sensitive_data:
+
+    log_raw_payloads: false
+
+    log_raw_email: false
+
+    log_raw_url: false
+
+    log_attachment_bytes: false
+
+    log_credentials: false
+
+    log_tokens: false
+
+    log_secrets: false
+
+    log_private_keys: false
+
+  required_provenance_keys:
+
+    - "model_id"
+    - "artifact_version"
+    - "model_artifact_sha256"
+    - "dataset_id"
+    - "dataset_sha256"
+    - "attack_config_hash"
+    - "git_commit"
+    - "evaluation_timestamp"
+    - "evaluation_engine_version"
+    - "framework_version"
+    - "onnx_runtime_version"
+    - "attack_engine_version"
+    - "random_seed"
+    - "trial_seeds"
+    - "attack_count"
+    - "attack_family_count"
+    - "clean_sample_count"
+    - "adversarial_sample_count"
+    - "attack_validity_rate"
+    - "attack_success_rate"
+    - "gate_passed"
+    - "failed_attacks"
+    - "failed_gates"
+
+
+# ==============================================================================
+# 21. ARTIFACT INTEGRITY
+# ==============================================================================
+
+artifacts:
+
+  require_manifest: true
+
+  require_sha256: true
+
+  immutable_reports: true
+
+  prohibit_overwrite: true
+
+  signing:
+
+    enabled: true
+
+    algorithm: "ed25519"
+
+    key_reference_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+    never_store_private_key: true
+
+  required_artifacts:
+
+    - "adversarial_summary.json"
+    - "adversarial_gate_status.json"
+    - "attack_matrix.json"
+    - "adversarial_provenance.json"
+
+  failed_artifacts:
+
+    quarantine: true
+
+    quarantine_directory: "artifacts/quarantine/failed_adversarial_evaluations"
+
+
+# ==============================================================================
+# 22. ORCHESTRATION
+# ==============================================================================
+
+execution:
+
+  timeout_seconds: 3600
+
+  parallel_attacks: true
+
+  max_workers: 4
+
+  attack_order:
+
+    - "input_contract"
+    - "clean_baseline"
+    - "attack_validity"
+    - "individual_attacks"
+    - "attack_families"
+    - "adaptive_attacks"
+    - "transfer_attacks"
+    - "onnx_parity"
+    - "quantized_model"
+    - "integrity_screen"
+    - "aggregate_gates"
+
+  fail_fast:
+
+    enabled: false
+
+    reason: >
+      All critical failures should be collected so the release report contains
+      a complete security assessment rather than only the first failure.
+
+  continue_after_noncritical_failure: true
+
+  continue_after_critical_failure: true
+
+  maximum_total_failures: 1000
+
+
+# ==============================================================================
+# 23. GATE DECISION ENGINE
+# ==============================================================================
+
+decision_engine:
+
+  enabled: true
+
+  evaluation_order:
+
+    - "configuration_validity"
+    - "dataset_integrity"
+    - "sample_sufficiency"
+    - "attack_validity"
+    - "clean_baseline"
+    - "per_attack_gates"
+    - "per_family_gates"
+    - "global_adversarial_gates"
+    - "statistical_gates"
+    - "adaptive_testing"
+    - "transfer_testing"
+    - "onnx_parity"
+    - "quantization_robustness"
+    - "model_integrity"
+    - "provenance_completeness"
+
+  decision_states:
+
+    pass: "PASS"
+
+    fail: "FAIL"
+
+    review: "REVIEW"
+
+    insufficient_data: "INSUFFICIENT_DATA"
+
+    configuration_error: "CONFIGURATION_ERROR"
+
+    system_error: "SYSTEM_ERROR"
+
+  production_policy:
+
+    allowed_states:
+      - "PASS"
+
+    prohibited_states:
+      - "FAIL"
+      - "REVIEW"
+      - "INSUFFICIENT_DATA"
+      - "CONFIGURATION_ERROR"
+      - "SYSTEM_ERROR"
+
+  fail_closed: true
+
+
+# ==============================================================================
+# 24. CLI EXIT CODES
+# ==============================================================================
+
+execution_exit_codes:
+
+  success_all_passed: 0
+
+  gate_failure: 1
+
+  insufficient_samples: 2
+
+  configuration_validation_error: 3
+
+  dataset_integrity_error: 4
+
+  artifact_integrity_error: 5
+
+  system_error: 10

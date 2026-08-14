@@ -1,0 +1,2022 @@
+# ==============================================================================
+# PhishGuard_AI - Feedback Label Ingestion & Verification Policy
+# Version: 13.0.0
+# File Path: mlops_pipeline/configs/feedback/label_policy.yaml
+#
+# PURPOSE
+# -------
+# Production-grade zero-trust policy governing the complete lifecycle of
+# security feedback:
+#
+#   external report
+#        |
+#        v
+#   raw feedback quarantine
+#        |
+#        v
+#   normalization / canonicalization
+#        |
+#        v
+#   provenance verification
+#        |
+#        v
+#   deduplication / campaign correlation
+#        |
+#        v
+#   reporter trust evaluation
+#        |
+#        v
+#   evidence aggregation
+#        |
+#        v
+#   consensus / arbitration
+#        |
+#        +--------------------+
+#        |                    |
+#        v                    v
+#   verified label       quarantine / reject
+#        |
+#        v
+#   training eligibility
+#        |
+#        v
+#   dataset snapshot
+#        |
+#        v
+#   retraining pipeline
+#
+# SECURITY OBJECTIVES
+# -------------------
+# - Prevent label poisoning
+# - Prevent clean-label poisoning
+# - Prevent duplicate/campaign amplification
+# - Prevent compromised reporter abuse
+# - Prevent cross-source false independence
+# - Preserve immutable provenance
+# - Separate feedback acceptance from training eligibility
+# - Detect anomalous labeling behavior
+# - Support label correction and revocation
+# - Preserve reproducibility
+# - Protect privacy and sensitive metadata
+# - Maintain complete auditability
+#
+# IMPORTANT
+# ---------
+# This file MUST NOT contain:
+# - secrets
+# - private keys
+# - API credentials
+# - access tokens
+# - raw email bodies
+# - raw attachments
+# - authentication material
+#
+# Cryptographic key material MUST be resolved externally through the
+# secrets-management layer.
+#
+# SECURITY REFERENCE
+# ------------------
+# The policy is designed around modern adversarial-ML threat categories
+# including data poisoning, clean-label poisoning, backdoor poisoning,
+# evasion-induced feedback contamination, and lifecycle attacks.
+# ==============================================================================
+
+
+# ==============================================================================
+# 0. SCHEMA & COMPATIBILITY CONTRACT
+# ==============================================================================
+
+schema:
+  schema_version: "1.1.0"
+  config_version: "13.0.0"
+  policy_contract_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_unknown_values: true
+    reject_unknown_features: true
+    reject_missing_required_fields: true
+    reject_duplicate_keys: true
+    reject_null_required_values: true
+
+  validation:
+    validate_numeric_ranges: true
+    validate_enum_values: true
+    validate_cross_field_constraints: true
+    validate_paths: true
+    validate_hash_algorithms: true
+    validate_timestamp_policy: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    maximum_tested_pipeline_version: "13.x"
+    labeling_engine_version: "1.1.0"
+    retraining_engine_version: "1.0.0"
+    dataset_contract_version: "1.1.0"
+
+  migration:
+    allow_automatic_schema_migration: false
+    require_explicit_migration: true
+    migration_manifest_required: true
+
+
+# ==============================================================================
+# 1. GLOBAL LABELING GOVERNANCE
+# ==============================================================================
+
+global_label_policy:
+
+  policy_id: "global_label_policy_v13"
+
+  policy_version: "13.0.0"
+
+  orchestrator:
+    service_name: "PhishGuard_MLOps_Label_Ingestion_Engine"
+    execution_mode: "deterministic"
+    fail_closed: true
+
+  enabled: true
+
+  trust_model:
+    default_trust_level: "zero_trust"
+
+    valid_levels:
+      - "zero_trust"
+      - "unverified"
+      - "provisional"
+      - "verified"
+      - "high_confidence"
+      - "revoked"
+
+    promotion_order:
+      - "zero_trust"
+      - "unverified"
+      - "provisional"
+      - "verified"
+      - "high_confidence"
+
+    revoked_is_terminal: true
+
+  lifecycle_states:
+    - "received"
+    - "normalized"
+    - "validated"
+    - "deduplicated"
+    - "evidence_collected"
+    - "under_review"
+    - "provisional"
+    - "verified"
+    - "training_eligible"
+    - "exported"
+    - "revoked"
+    - "quarantined"
+    - "rejected"
+
+  separation_of_duties:
+    enabled: true
+
+    prohibit_self_approval: true
+
+    prohibit_same_actor_submission_and_approval: true
+
+    prohibit_same_actor_label_and_arbitration: true
+
+    require_independent_arbitrator_for_conflicts: true
+
+    minimum_distinct_human_approvers_for_high_impact_labels: 2
+
+
+# ==============================================================================
+# 2. LABEL TRUST & DECISION MODEL
+# ==============================================================================
+
+trust_and_consensus:
+
+  enabled: true
+
+  scoring:
+    model: "weighted_evidence_consensus"
+
+    score_components:
+
+      source_reliability:
+        enabled: true
+        weight: 0.30
+
+      independent_human_consensus:
+        enabled: true
+        weight: 0.25
+
+      automated_evidence:
+        enabled: true
+        weight: 0.20
+
+      historical_reporter_reliability:
+        enabled: true
+        weight: 0.10
+
+      corroboration:
+        enabled: true
+        weight: 0.10
+
+      temporal_consistency:
+        enabled: true
+        weight: 0.05
+
+    total_weight_must_equal: 1.0
+
+  consensus_thresholds:
+
+    provisional:
+      minimum_score: 0.70
+      minimum_independent_sources: 1
+      training_eligible: false
+
+    verified:
+      minimum_score: 0.85
+      minimum_independent_sources: 2
+      minimum_human_sources: 1
+      training_eligible: true
+
+    high_confidence:
+      minimum_score: 0.95
+      minimum_independent_sources: 3
+      minimum_human_sources: 1
+      training_eligible: true
+
+  disagreement:
+
+    enabled: true
+
+    max_label_conflict_ratio: 0.10
+
+    conflict_actions:
+
+      low_conflict:
+        max_ratio: 0.05
+        action: "continue_evidence_collection"
+
+      medium_conflict:
+        max_ratio: 0.10
+        action: "route_to_manual_review"
+
+      high_conflict:
+        min_ratio: 0.10
+        action: "quarantine"
+
+    automatic_resolution:
+      enabled: false
+
+    require_arbitration_when_conflicting_high_impact_labels: true
+
+
+# ==============================================================================
+# 3. LABEL DECISION STATES
+# ==============================================================================
+
+label_decision_policy:
+
+  labels:
+
+    0:
+      name: "benign"
+      semantic_class: "non_malicious"
+
+    1:
+      name: "malicious"
+      semantic_class: "malicious"
+
+  unknown_label:
+    allowed: true
+    value: "unknown"
+    training_eligible: false
+    action: "quarantine"
+
+  conflicting_label:
+    allowed: true
+    value: "conflict"
+    training_eligible: false
+    action: "arbitration_queue"
+
+  abstain_label:
+    allowed: true
+    value: "abstain"
+    training_eligible: false
+    action: "retain_for_future_evidence"
+
+  label_revision:
+    enabled: true
+
+    require_new_event_id: true
+
+    never_mutate_original_event: true
+
+    preserve_previous_label: true
+
+    preserve_previous_reason: true
+
+    require_revision_reason: true
+
+    require_authorized_reviewer: true
+
+
+# ==============================================================================
+# 4. REPORTER TRUST MODEL
+# ==============================================================================
+
+reporter_tiers:
+
+  # --------------------------------------------------------------------------
+  # Tier 1 - Senior Security / Threat Intelligence
+  # --------------------------------------------------------------------------
+
+  tier_1_secops_lead:
+
+    tier_id: "tier_1_secops_lead"
+
+    description: >
+      Senior security analysts, threat intelligence leads, incident response
+      leads, or equivalent trusted security personnel.
+
+    base_weight: 1.00
+
+    trust_score:
+      initial: 0.90
+      maximum: 0.995
+      minimum: 0.50
+
+    historical_reliability:
+      enabled: true
+      minimum_observations: 100
+      rolling_window_labels: 500
+      decay_factor: 0.995
+
+    auto_approve_ground_truth: false
+
+    secondary_approval:
+      required: true
+
+    maximum_single_report_influence: 0.50
+
+    high_impact_label:
+      requires_secondary_approval: true
+
+
+  # --------------------------------------------------------------------------
+  # Tier 2 - SOC Analyst
+  # --------------------------------------------------------------------------
+
+  tier_2_soc_analyst:
+
+    tier_id: "tier_2_soc_analyst"
+
+    base_weight: 0.80
+
+    trust_score:
+      initial: 0.80
+      maximum: 0.95
+      minimum: 0.40
+
+    historical_reliability:
+      enabled: true
+      minimum_observations: 100
+      rolling_window_labels: 500
+      decay_factor: 0.995
+
+    auto_approve_ground_truth: false
+
+    secondary_approval:
+      required: true
+
+    maximum_single_report_influence: 0.40
+
+
+  # --------------------------------------------------------------------------
+  # Tier 3 - Automated Security Evidence
+  # --------------------------------------------------------------------------
+
+  tier_3_automated_security_evidence:
+
+    tier_id: "tier_3_automated_security_evidence"
+
+    base_weight: 0.75
+
+    trust_score:
+      initial: 0.75
+      maximum: 0.95
+      minimum: 0.30
+
+    auto_approve_ground_truth: false
+
+    human_confirmation:
+      required_for_training_label: true
+
+    evidence_requirements:
+
+      sandbox:
+        minimum_malicious_score: 80
+
+      yara:
+        minimum_matching_rules: 2
+
+      independent_detection_engines:
+        minimum_matching_engines: 2
+
+      conflicting_engine_threshold:
+        max_conflicting_engines: 1
+
+
+  # --------------------------------------------------------------------------
+  # Tier 4 - End User Report
+  # --------------------------------------------------------------------------
+
+  tier_4_end_user_report:
+
+    tier_id: "tier_4_end_user_report"
+
+    base_weight: 0.20
+
+    trust_score:
+      initial: 0.40
+      maximum: 0.75
+      minimum: 0.10
+
+    auto_approve_ground_truth: false
+
+    secondary_approval:
+      required: true
+
+    minimum_distinct_reporters: 3
+
+    maximum_single_reporter_influence: 0.10
+
+
+  # --------------------------------------------------------------------------
+  # Unknown / Untrusted Source
+  # --------------------------------------------------------------------------
+
+  unknown_reporter:
+
+    tier_id: "unknown_reporter"
+
+    base_weight: 0.05
+
+    trust_score:
+      initial: 0.10
+      maximum: 0.20
+      minimum: 0.00
+
+    auto_approve_ground_truth: false
+
+    training_eligible: false
+
+    action:
+      default: "quarantine"
+
+
+# ==============================================================================
+# 5. REPORTER RELIABILITY MANAGEMENT
+# ==============================================================================
+
+reporter_reliability:
+
+  enabled: true
+
+  calculation:
+
+    metric: "time_weighted_brier_and_label_accuracy"
+
+    minimum_observations: 100
+
+    rolling_window: 500
+
+    exponential_decay:
+      enabled: true
+      decay_factor: 0.995
+
+  trust_adjustment:
+
+    enabled: true
+
+    maximum_adjustment_per_cycle: 0.05
+
+    minimum_trust: 0.10
+
+    maximum_trust: 0.995
+
+  suspension:
+
+    enabled: true
+
+    triggers:
+
+      sudden_error_rate:
+        enabled: true
+        threshold: 0.30
+        minimum_samples: 50
+
+      label_distribution_shift:
+        enabled: true
+        psi_threshold: 0.25
+
+      burst_reporting:
+        enabled: true
+
+      repeated_conflicts:
+        enabled: true
+        max_conflicts_30d: 10
+
+    action: "temporarily_suspend_label_influence"
+
+    require_review_before_reactivation: true
+
+
+# ==============================================================================
+# 6. SOURCE INDEPENDENCE & COLLUSION CONTROLS
+# ==============================================================================
+
+source_independence:
+
+  enabled: true
+
+  independence_dimensions:
+
+    reporter_identity:
+      enabled: true
+
+    organization:
+      enabled: true
+
+    ip_network:
+      enabled: true
+
+    user_agent:
+      enabled: true
+
+    campaign_id:
+      enabled: true
+
+    case_id:
+      enabled: true
+
+    upstream_source:
+      enabled: true
+
+    automated_engine:
+      enabled: true
+
+  maximum_effective_sources:
+
+    same_reporter: 1
+
+    same_organization: 1
+
+    same_campaign: 1
+
+    same_automated_engine: 1
+
+  independence_rule:
+    count_distinct_dimensions:
+      - "reporter_identity"
+      - "organization"
+      - "campaign_id"
+      - "upstream_source"
+
+    minimum_independent_dimensions_for_verified_label: 2
+
+  collusion_detection:
+
+    enabled: true
+
+    similarity_threshold: 0.95
+
+    time_window_minutes: 15
+
+    burst_threshold: 20
+
+    action: "quarantine_cluster"
+
+
+# ==============================================================================
+# 7. LABEL EVIDENCE REQUIREMENTS
+# ==============================================================================
+
+evidence_policy:
+
+  enabled: true
+
+  minimum_evidence:
+
+    benign:
+
+      verified:
+        human_review_required: true
+        minimum_independent_evidence: 2
+
+      high_confidence:
+        human_review_required: true
+        minimum_independent_evidence: 3
+
+    malicious:
+
+      verified:
+        human_review_required: true
+        minimum_independent_evidence: 2
+
+      high_confidence:
+        human_review_required: true
+        minimum_independent_evidence: 3
+
+  evidence_types:
+
+    human_analysis:
+      enabled: true
+      trust_weight: 1.0
+
+    sandbox:
+      enabled: true
+      trust_weight: 0.85
+
+    antivirus:
+      enabled: true
+      trust_weight: 0.75
+
+    threat_intelligence:
+      enabled: true
+      trust_weight: 0.85
+
+    domain_reputation:
+      enabled: true
+      trust_weight: 0.60
+
+    user_report:
+      enabled: true
+      trust_weight: 0.20
+
+    model_prediction:
+      enabled: true
+      trust_weight: 0.15
+      cannot_be_sole_ground_truth: true
+
+  evidence_expiration:
+
+    enabled: true
+
+    default_validity_days: 30
+
+    high_volatility_artifacts_days: 7
+
+    stable_artifacts_days: 90
+
+    require_timestamp: true
+
+
+# ==============================================================================
+# 8. CAMPAIGN / FAMILY CORRELATION
+# ==============================================================================
+
+campaign_correlation:
+
+  enabled: true
+
+  identifiers:
+
+    primary:
+      - "campaign_id"
+
+    secondary:
+      - "sha256"
+      - "domain"
+      - "url"
+      - "sender_cluster"
+      - "attachment_family"
+
+  propagation:
+
+    enabled: true
+
+    maximum_label_inheritance_depth: 1
+
+    inherited_labels:
+      automatically_training_eligible: false
+
+      require_confirmation: true
+
+  contamination_protection:
+
+    enabled: true
+
+    maximum_campaign_fraction_of_training_batch: 0.05
+
+    maximum_single_source_fraction_of_training_batch: 0.10
+
+    maximum_single_reporter_fraction_of_training_batch: 0.05
+
+
+# ==============================================================================
+# 9. DEDUPLICATION & CANONICALIZATION
+# ==============================================================================
+
+deduplication:
+
+  enabled: true
+
+  exact:
+
+    enabled: true
+
+    algorithms:
+      - "sha256"
+
+    action: "merge_evidence"
+
+
+  near_duplicate:
+
+    enabled: true
+
+    algorithms:
+
+      ssdeep:
+        enabled: true
+        similarity_threshold: 0.85
+
+      tlsh:
+        enabled: true
+        distance_threshold: 100
+
+  semantic_duplicate:
+
+    enabled: true
+
+    method: "normalized_content_fingerprint"
+
+    similarity_threshold: 0.95
+
+  canonicalization:
+
+    enabled: true
+
+    normalize_unicode: "NFKC"
+
+    normalize_case: true
+
+    strip_tracking_parameters: true
+
+    normalize_url_encoding: true
+
+    preserve_original_fingerprint: true
+
+  duplicate_policy:
+
+    never_create_new_ground_truth_from_duplicate: true
+
+    update_existing_consensus: true
+
+    preserve_all_original_events: true
+
+
+# ==============================================================================
+# 10. ANTI-POISONING CONTROLS
+# ==============================================================================
+
+anti_poisoning:
+
+  enabled: true
+
+  protection_level: "strict"
+
+  attack_classes:
+
+    random_label_noise:
+      enabled: true
+      maximum_allowed_rate: 0.02
+
+    targeted_label_flip:
+      enabled: true
+
+      detection:
+        monitor_label_reversal_rate: true
+        maximum_label_reversal_rate: 0.05
+
+    clean_label_poisoning:
+      enabled: true
+
+      similarity_analysis:
+        enabled: true
+
+      cluster_analysis:
+        enabled: true
+
+      outlier_analysis:
+        enabled: true
+
+    backdoor_pattern_injection:
+      enabled: true
+
+      detect_repeated_trigger_patterns: true
+
+      minimum_trigger_frequency: 0.005
+
+    campaign_poisoning:
+      enabled: true
+
+      maximum_campaign_training_fraction: 0.05
+
+    reporter_poisoning:
+      enabled: true
+
+      maximum_single_reporter_training_fraction: 0.05
+
+  batch_controls:
+
+    maximum_new_labels_per_batch: 10000
+
+    maximum_malicious_label_ratio: 0.90
+
+    minimum_malicious_label_ratio: 0.01
+
+    maximum_label_distribution_shift_psi: 0.20
+
+    maximum_feature_distribution_shift_psi: 0.25
+
+    maximum_anomalous_sample_ratio: 0.01
+
+    maximum_quarantine_ratio: 0.20
+
+    action_on_violation: "quarantine_batch"
+
+
+# ==============================================================================
+# 11. BURST & RATE LIMITING
+# ==============================================================================
+
+rate_limiting:
+
+  enabled: true
+
+  dimensions:
+
+    reporter:
+
+      max_reports_per_hour: 10
+      max_reports_per_day: 100
+
+    organization:
+
+      max_reports_per_hour: 500
+      max_reports_per_day: 5000
+
+    ip_network:
+
+      max_reports_per_hour: 100
+      max_reports_per_day: 1000
+
+    campaign:
+
+      max_reports_per_5_minutes: 50
+      max_reports_per_hour: 500
+
+    global:
+
+      max_reports_per_minute: 5000
+      max_reports_per_hour: 50000
+
+  burst_detection:
+
+    enabled: true
+
+    threshold_count: 50
+
+    window_minutes: 5
+
+    action: "quarantine_and_alert"
+
+  distributed_burst_detection:
+
+    enabled: true
+
+    correlation_dimensions:
+      - "campaign_id"
+      - "organization"
+      - "source_network"
+
+    action: "quarantine_cluster"
+
+
+# ==============================================================================
+# 12. LABEL FRESHNESS & TEMPORAL INTEGRITY
+# ==============================================================================
+
+label_freshness:
+
+  enabled: true
+
+  default_max_age_days: 30
+
+  model_specific:
+
+    email_classifier:
+      max_age_days: 30
+
+    url_classifier:
+      max_age_days: 14
+
+    attachment_classifier:
+      max_age_days: 30
+
+  temporal_validation:
+
+    enabled: true
+
+    require_event_timestamp: true
+
+    require_verification_timestamp: true
+
+    require_monotonic_event_order: true
+
+    maximum_future_skew_minutes: 5
+
+    maximum_clock_skew_minutes: 10
+
+  stale_label_action:
+    action: "exclude_from_training"
+
+    preserve_for_audit: true
+
+    allow_revalidation: true
+
+
+# ==============================================================================
+# 13. MODEL-DISAGREEMENT POLICY
+# ==============================================================================
+
+model_disagreement:
+
+  enabled: true
+
+  model_predictions_are_evidence_only: true
+
+  disagreement_detection:
+
+    enabled: true
+
+    probability_margin_threshold: 0.40
+
+    action: "request_additional_evidence"
+
+  high_confidence_model_disagreement:
+
+    enabled: true
+
+    model_probability_threshold: 0.95
+
+    action: "manual_review"
+
+  model_cannot_override_human_ground_truth: true
+
+  human_label_cannot_override_verified_forensic_evidence_without_arbitration: true
+
+
+# ==============================================================================
+# 14. HIGH-IMPACT / EMERGENCY LABEL POLICY
+# ==============================================================================
+
+high_impact_labels:
+
+  enabled: true
+
+  categories:
+
+    vip_related:
+      enabled: true
+      require_dual_human_approval: true
+
+    executive_impersonation:
+      enabled: true
+      require_dual_human_approval: true
+
+    financial_fraud:
+      enabled: true
+      require_dual_human_approval: true
+
+    malware_attachment:
+      enabled: true
+      require_forensic_evidence: true
+
+    widespread_campaign:
+      enabled: true
+      require_campaign_review: true
+
+  emergency_labeling:
+
+    enabled: true
+
+    emergency_labels_may_enter_production_training: false
+
+    require_secops_lead_approval: true
+
+    require_post_incident_review: true
+
+    maximum_emergency_label_lifetime_days: 7
+
+
+# ==============================================================================
+# 15. ARBITRATION POLICY
+# ==============================================================================
+
+arbitration:
+
+  enabled: true
+
+  queue:
+    name: "label_arbitration_queue"
+
+    priority_levels:
+      - "critical"
+      - "high"
+      - "normal"
+      - "low"
+
+  triggers:
+
+    conflicting_human_labels: true
+
+    conflicting_forensic_evidence: true
+
+    high_impact_label: true
+
+    low_consensus: true
+
+    poisoning_indicator: true
+
+    source_collusion_indicator: true
+
+  arbitrator_requirements:
+
+    minimum_tier: "tier_1_secops_lead"
+
+    independent_from_original_labelers: true
+
+    dual_approval_for_high_impact: true
+
+  arbitration_outcomes:
+
+    - "benign"
+    - "malicious"
+    - "unknown"
+    - "insufficient_evidence"
+
+  arbitration_is_final:
+    default: true
+
+  appeal:
+
+    enabled: true
+
+    require_new_evidence: true
+
+    require_new_reviewer: true
+
+    minimum_waiting_period_hours: 24
+
+
+# ==============================================================================
+# 16. PRIVACY, PII & SECRET SANITIZATION
+# ==============================================================================
+
+privacy_and_redaction:
+
+  enabled: true
+
+  pii_redaction_required: true
+
+  anonymize_reporter_identity: true
+
+  reporter_identifier:
+
+    storage: "pseudonymous"
+
+    hashing:
+      enabled: true
+      algorithm: "hmac_sha256"
+      key_reference: "external_secret_reference"
+
+  sensitive_data:
+
+    strip_credentials_and_tokens: true
+
+    strip_authentication_headers: true
+
+    strip_private_keys: true
+
+    strip_session_identifiers: true
+
+    strip_cookie_values: true
+
+  raw_content:
+
+    storage_allowed_in_label_dataset: false
+
+    storage_allowed_in_quarantine: true
+
+    quarantine_retention_days: 30
+
+    encrypted_at_rest: true
+
+    access_logged: true
+
+  privacy_failure_action:
+    action: "quarantine"
+
+
+# ==============================================================================
+# 17. PROVENANCE & EVENT INTEGRITY
+# ==============================================================================
+
+provenance:
+
+  required: true
+
+  event_identity:
+
+    required_fields:
+
+      - "event_id"
+      - "sample_id"
+      - "source_id"
+      - "reporter_id"
+      - "event_timestamp"
+      - "ingestion_timestamp"
+
+    event_id_algorithm: "uuidv7"
+
+  content_identity:
+
+    primary_hash:
+      algorithm: "sha256"
+      required: true
+
+    canonical_hash:
+      algorithm: "sha256"
+      required: true
+
+  chain_integrity:
+
+    enabled: true
+
+    append_only: true
+
+    previous_event_hash_required: true
+
+    event_hash_algorithm: "sha256"
+
+  provenance_fields:
+
+    required:
+
+      - "model_id"
+      - "artifact_version"
+      - "policy_version"
+      - "pipeline_version"
+      - "source_type"
+      - "case_id"
+      - "campaign_id"
+      - "collector_version"
+      - "normalizer_version"
+
+  tamper_detection:
+
+    enabled: true
+
+    action_on_integrity_failure: "quarantine_and_alert"
+
+
+# ==============================================================================
+# 18. DATA QUALITY VALIDATION
+# ==============================================================================
+
+data_quality:
+
+  enabled: true
+
+  required_fields:
+
+    - "event_id"
+    - "sample_id"
+    - "sha256"
+    - "submitted_label"
+    - "source_type"
+    - "event_timestamp"
+    - "ingestion_timestamp"
+
+  validation:
+
+    reject_null_required_fields: true
+
+    reject_invalid_hashes: true
+
+    reject_invalid_timestamps: true
+
+    reject_future_timestamps: true
+
+    reject_unknown_label_values: true
+
+    reject_invalid_unicode: false
+
+    sanitize_invalid_unicode: true
+
+  numerical:
+
+    reject_nan: true
+
+    reject_inf: true
+
+  malformed_record_action:
+    action: "quarantine"
+
+
+# ==============================================================================
+# 19. TRAINING ELIGIBILITY CONTRACT
+# ==============================================================================
+
+training_eligibility:
+
+  enabled: true
+
+  requirements:
+
+    minimum_trust_level: "verified"
+
+    require_consensus: true
+
+    require_provenance: true
+
+    require_integrity_verification: true
+
+    require_privacy_validation: true
+
+    require_deduplication: true
+
+    require_poisoning_scan: true
+
+    require_freshness_check: true
+
+    require_campaign_check: true
+
+    require_source_independence_check: true
+
+  prohibited_sources:
+
+    - "unknown_reporter"
+
+  prohibited_states:
+
+    - "received"
+    - "normalized"
+    - "validated"
+    - "under_review"
+    - "provisional"
+    - "quarantined"
+    - "rejected"
+    - "revoked"
+
+  training_dataset_separation:
+
+    enabled: true
+
+    raw_feedback_store:
+      training_access: false
+
+    verified_label_store:
+      training_access: true
+
+    quarantine_store:
+      training_access: false
+
+  label_snapshot:
+
+    immutable: true
+
+    snapshot_id_required: true
+
+    snapshot_hash_required: true
+
+    creation_timestamp_required: true
+
+
+# ==============================================================================
+# 20. DATASET EXPORT CONTRACT
+# ==============================================================================
+
+export_rules:
+
+  enabled: true
+
+  export_target:
+    directory: "artifacts/processed_feedback"
+
+    filename: "verified_labels.parquet"
+
+    file_format: "parquet"
+
+    compression: "snappy"
+
+  atomic_export:
+
+    enabled: true
+
+    temporary_extension: ".partial"
+
+    atomic_rename_required: true
+
+  schema_enforcement:
+
+    strict: true
+
+    required_columns:
+
+      - "event_id"
+      - "sample_id"
+      - "sha256"
+      - "canonical_sha256"
+      - "final_label"
+      - "sub_category"
+      - "consensus_score"
+      - "trust_level"
+      - "verification_timestamp"
+      - "label_version"
+      - "anonymized_reporter_tier"
+      - "campaign_id"
+      - "is_vip_related"
+      - "provenance_hash"
+
+  export_eligibility:
+
+    require_training_eligible: true
+
+    require_not_revoked: true
+
+    require_not_quarantined: true
+
+  integrity:
+
+    manifest_required: true
+
+    manifest_filename: "verified_labels.manifest.json"
+
+    hash_algorithm: "sha256"
+
+    row_count_required: true
+
+    schema_hash_required: true
+
+  batch_controls:
+
+    minimum_export_batch_size: 100
+
+    maximum_export_batch_size: 10000
+
+    export_schedule_cron: "0 */6 * * *"
+
+  rollback:
+
+    enabled: true
+
+    immutable_snapshots: true
+
+    allow_snapshot_retraction: true
+
+    retraction_requires_authorization: true
+
+
+# ==============================================================================
+# 21. DATASET CONTAMINATION CONTROLS
+# ==============================================================================
+
+dataset_contamination:
+
+  enabled: true
+
+  split_protection:
+
+    prevent_same_hash_across_splits: true
+
+    prevent_same_campaign_across_splits: true
+
+    prevent_near_duplicate_across_splits: true
+
+    prevent_same_attachment_family_across_splits: true
+
+    prevent_same_url_cluster_across_splits: true
+
+  test_set_protection:
+
+    immutable: true
+
+    feedback_write_access: false
+
+    training_access: false
+
+    label_updates_require_special_review: true
+
+  validation_set_protection:
+
+    training_access: false
+
+    threshold_tuning_allowed: true
+
+    gradient_updates_allowed: false
+
+
+# ==============================================================================
+# 22. RETRACTION & LABEL REVOCATION
+# ==============================================================================
+
+label_revocation:
+
+  enabled: true
+
+  triggers:
+
+    confirmed_label_error: true
+
+    evidence_reversal: true
+
+    compromised_reporter: true
+
+    poisoning_detection: true
+
+    provenance_failure: true
+
+  revocation:
+
+    immutable_event: true
+
+    preserve_original_record: true
+
+    create_retraction_event: true
+
+    remove_from_future_training: true
+
+    trigger_dataset_rebuild: true
+
+  downstream_impact_analysis:
+
+    enabled: true
+
+    identify_models_trained_with_revoked_labels: true
+
+    identify_dataset_snapshots: true
+
+    identify_training_runs: true
+
+    identify_promoted_artifacts: true
+
+    trigger_retraining_assessment: true
+
+
+# ==============================================================================
+# 23. ANTI-POISONING MONITORING & ALERTING
+# ==============================================================================
+
+monitoring:
+
+  enabled: true
+
+  metrics:
+
+    ingestion_volume:
+      enabled: true
+
+    label_distribution:
+      enabled: true
+
+    reporter_distribution:
+      enabled: true
+
+    source_distribution:
+      enabled: true
+
+    campaign_distribution:
+      enabled: true
+
+    quarantine_rate:
+      enabled: true
+
+    conflict_rate:
+      enabled: true
+
+    revision_rate:
+      enabled: true
+
+    revocation_rate:
+      enabled: true
+
+    consensus_score_distribution:
+      enabled: true
+
+    trust_score_distribution:
+      enabled: true
+
+  drift_detection:
+
+    enabled: true
+
+    psi:
+
+      enabled: true
+
+      threshold: 0.20
+
+      critical_threshold: 0.25
+
+    ks_test:
+
+      enabled: true
+
+      p_value_threshold: 0.01
+
+  alert_thresholds:
+
+    quarantine_rate:
+      warning: 0.05
+      critical: 0.20
+
+    conflict_rate:
+      warning: 0.05
+      critical: 0.10
+
+    label_distribution_shift:
+      warning_psi: 0.10
+      critical_psi: 0.20
+
+    reporter_concentration:
+      warning: 0.05
+      critical: 0.10
+
+  alert_actions:
+
+    critical:
+      - "pause_training_export"
+      - "quarantine_current_batch"
+      - "create_security_alert"
+      - "require_manual_review"
+
+
+# ==============================================================================
+# 24. CIRCUIT BREAKERS
+# ==============================================================================
+
+circuit_breakers:
+
+  enabled: true
+
+  global:
+
+    maximum_quarantine_rate: 0.20
+
+    maximum_conflict_rate: 0.10
+
+    maximum_poisoning_indicators: 5
+
+    maximum_integrity_failures: 1
+
+    action:
+      - "pause_label_export"
+      - "pause_retraining_trigger"
+      - "quarantine_batch"
+      - "alert_secops"
+
+  model_specific:
+
+    email_classifier:
+
+      maximum_label_shift_psi: 0.20
+
+      maximum_false_label_rate: 0.05
+
+    url_classifier:
+
+      maximum_label_shift_psi: 0.20
+
+      maximum_false_label_rate: 0.05
+
+    attachment_classifier:
+
+      maximum_label_shift_psi: 0.20
+
+      maximum_false_label_rate: 0.05
+
+  recovery:
+
+    automatic_recovery: false
+
+    require_human_authorization: true
+
+    require_root_cause_analysis: true
+
+    require_new_validation_snapshot: true
+
+
+# ==============================================================================
+# 25. RETRAINING INTEGRATION CONTRACT
+# ==============================================================================
+
+retraining_integration:
+
+  enabled: true
+
+  trigger_engine:
+    config_reference: "configs/feedback/retrain_rules.yaml"
+
+  verified_label_output:
+    consumed_only_if_training_eligible: true
+
+  minimum_new_verified_samples:
+
+    email_classifier: 500
+
+    url_classifier: 1000
+
+    attachment_classifier: 300
+
+  emergency_training:
+
+    enabled: false
+
+    manual_override_allowed: true
+
+    require_secops_approval: true
+
+    require_evaluation_gates: true
+
+    require_adversarial_gates: true
+
+    require_fairness_gates: true
+
+    require_rollback_plan: true
+
+
+# ==============================================================================
+# 26. AUDIT LOGGING
+# ==============================================================================
+
+audit:
+
+  enabled: true
+
+  append_only: true
+
+  immutable: true
+
+  events:
+
+    - "feedback_received"
+    - "feedback_normalized"
+    - "feedback_validated"
+    - "duplicate_detected"
+    - "evidence_added"
+    - "consensus_updated"
+    - "label_verified"
+    - "label_rejected"
+    - "label_quarantined"
+    - "label_revised"
+    - "label_revoked"
+    - "arbitration_started"
+    - "arbitration_completed"
+    - "dataset_exported"
+    - "dataset_retracted"
+    - "circuit_breaker_triggered"
+
+  required_fields:
+
+    - "event_id"
+    - "timestamp"
+    - "actor_id"
+    - "actor_type"
+    - "action"
+    - "sample_id"
+    - "previous_state"
+    - "new_state"
+    - "reason"
+    - "policy_version"
+    - "provenance_hash"
+
+  retention:
+
+    minimum_days: 365
+
+    security_events_days: 730
+
+    legal_hold_supported: true
+
+
+# ==============================================================================
+# 27. REPORTING
+# ==============================================================================
+
+reporting:
+
+  enabled: true
+
+  generate_json_summary: true
+
+  generate_markdown_report: true
+
+  output_directory:
+    base: "artifacts/reports/label_policy"
+
+  report_filenames:
+
+    summary_json:
+      name: "label_policy_summary.json"
+
+    quarantine_log:
+      name: "label_quarantine.log"
+
+    consensus_report:
+      name: "consensus_report.json"
+
+    poisoning_report:
+      name: "poisoning_detection_report.json"
+
+    provenance_report:
+      name: "provenance_integrity_report.json"
+
+    dataset_manifest:
+      name: "dataset_manifest.json"
+
+  required_provenance_keys:
+
+    - "policy_id"
+    - "policy_version"
+    - "ingestion_timestamp"
+    - "total_samples_processed"
+    - "samples_normalized"
+    - "samples_verified"
+    - "samples_training_eligible"
+    - "samples_quarantined"
+    - "samples_rejected"
+    - "samples_revoked"
+    - "duplicate_count"
+    - "conflict_count"
+    - "poisoning_anomalies_detected"
+    - "circuit_breaker_state"
+    - "dataset_snapshot_id"
+    - "dataset_snapshot_hash"
+    - "label_policy_hash"
+
+
+# ==============================================================================
+# 28. OBSERVABILITY
+# ==============================================================================
+
+observability:
+
+  enabled: true
+
+  metrics_backend:
+    required: true
+
+  counters:
+
+    - "feedback_ingested_total"
+    - "feedback_verified_total"
+    - "feedback_quarantined_total"
+    - "feedback_rejected_total"
+    - "feedback_revoked_total"
+    - "feedback_duplicate_total"
+    - "feedback_conflict_total"
+    - "poisoning_detection_total"
+    - "arbitration_total"
+    - "dataset_export_total"
+
+  histograms:
+
+    - "consensus_score"
+    - "verification_latency_seconds"
+    - "reporter_trust_score"
+
+  alerts:
+
+    poisoning_detected:
+      severity: "critical"
+
+    integrity_failure:
+      severity: "critical"
+
+    quarantine_spike:
+      severity: "high"
+
+    label_distribution_shift:
+      severity: "high"
+
+    reporter_anomaly:
+      severity: "high"
+
+
+# ==============================================================================
+# 29. EXECUTION CONTRACT
+# ==============================================================================
+
+execution:
+
+  enabled: true
+
+  mode: "deterministic"
+
+  timeout_seconds: 1800
+
+  max_batch_processing_seconds: 600
+
+  concurrency:
+
+    enabled: true
+
+    max_workers: 4
+
+    preserve_deterministic_ordering: true
+
+  retry_policy:
+
+    enabled: true
+
+    maximum_attempts: 3
+
+    exponential_backoff_seconds: 5
+
+    retry_on:
+
+      - "temporary_storage_failure"
+      - "temporary_database_failure"
+      - "temporary_metrics_failure"
+
+    never_retry_on:
+
+      - "schema_validation_error"
+      - "provenance_failure"
+      - "integrity_failure"
+      - "poisoning_detection"
+      - "authorization_failure"
+
+  failure_policy:
+
+    fail_closed: true
+
+    quarantine_on_unhandled_error: true
+
+    pause_export_on_validation_failure: true
+
+    pause_retraining_on_integrity_failure: true
+
+  cli_exit_codes:
+
+    success_all_processed: 0
+
+    no_eligible_labels: 100
+
+    quarantine_threshold_exceeded: 101
+
+    poisoning_detected: 102
+
+    provenance_integrity_failure: 103
+
+    authorization_failure: 104
+
+    schema_validation_error: 2
+
+    system_error: 3
+
+
+# ==============================================================================
+# 30. CONFIGURATION SELF-VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  startup_validation: true
+
+  strict_schema_validation: true
+
+  validate_schema_version: true
+
+  validate_policy_version: true
+
+  validate_model_references: true
+
+  validate_reporter_tiers: true
+
+  validate_consensus_weights: true
+
+  validate_threshold_ranges: true
+
+  validate_hash_algorithms: true
+
+  validate_required_fields: true
+
+  validate_cross_field_constraints: true
+
+  validate_training_eligibility_contract: true
+
+  validate_dataset_separation: true
+
+  validate_circuit_breakers: true
+
+  validate_export_contract: true
+
+  validate_provenance_contract: true
+
+  validate_privacy_contract: true
+
+  fail_on_invalid_configuration: true
+
+
+# ==============================================================================
+# 31. IMMUTABILITY & CHANGE MANAGEMENT
+# ==============================================================================
+
+change_management:
+
+  configuration_immutable_at_runtime: true
+
+  runtime_mutation_allowed: false
+
+  configuration_hash_required: true
+
+  configuration_hash_algorithm: "sha256"
+
+  change_requires:
+
+    code_review: true
+
+    security_review: true
+
+    ml_engineering_review: true
+
+    configuration_validation: true
+
+    regression_evaluation: true
+
+    adversarial_evaluation: true
+
+  production_change:
+
+    require_signed_commit: true
+
+    require_change_ticket: true
+
+    require_approval_count: 2
+
+  emergency_change:
+
+    allowed: true
+
+    require_secops_approval: true
+
+    require_post_change_review: true
+
+    require_full_evaluation_before_next_training_cycle: true
+
+
+# ==============================================================================
+# 32. FINAL SECURITY DEFAULTS
+# ==============================================================================
+
+security_defaults:
+
+  zero_trust_feedback: true
+
+  fail_closed: true
+
+  deny_by_default: true
+
+  unknown_source_is_untrusted: true
+
+  unknown_label_is_not_training_eligible: true
+
+  conflicting_label_is_not_training_eligible: true
+
+  quarantined_label_is_not_training_eligible: true
+
+  revoked_label_is_not_training_eligible: true
+
+  model_prediction_cannot_be_ground_truth: true
+
+  raw_feedback_cannot_enter_training_directly: true
+
+  test_data_cannot_enter_training: true
+
+  validation_data_cannot_enter_gradient_updates: true
+
+  immutable_audit_log: true
+
+  immutable_dataset_snapshots: true
+
+  cryptographic_provenance_required: true
+
+  human_approval_required_for_high_impact_labels: true
+
+  automatic_recovery_from_security_circuit_breaker: false

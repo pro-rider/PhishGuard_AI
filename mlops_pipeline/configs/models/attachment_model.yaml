@@ -1,0 +1,1839 @@
+# ==============================================================================
+# PhishGuard_AI - Attachment Classifier Model Specification
+# Version: 13.0.0
+# Model ID: attachment_classifier
+#
+# Production Model Contract
+# ------------------------------------------------------------------------------
+# This file is an authoritative model-specific contract consumed by:
+#
+#   mlops_pipeline/
+#       configs/models/
+#       src/
+#       stages/
+#
+# and ultimately by:
+#
+#   ml_inference/
+#       predictor.py
+#       model_registry.py
+#
+# Detection scope
+# --------------
+# - Malicious Office macros (VBA / XL4)
+# - Weaponized PDFs
+# - Executables and scripts
+# - Archive/container abuse
+# - LNK / ISO / IMG container smuggling
+# - MIME / magic-number mismatch
+# - Polyglot and file-structure anomalies
+# - Suspicious PE characteristics
+# - Byte-level distribution anomalies
+# - Extracted script/macro semantics
+#
+# Security principles
+# -------------------
+# - ML is a detection signal, NOT the sole security control.
+# - File parsing and extraction limits are enforced before ML inference.
+# - Model probabilities are calibrated before production decisions.
+# - Thresholds are learned on validation data only.
+# - Test and production data MUST NOT influence threshold selection.
+# - Model/tokenizer artifacts are immutable and content-addressed.
+# - No secrets or raw attachment payloads are stored in this file.
+# ==============================================================================
+
+
+schema:
+  schema_version: "1.1.0"
+  config_version: "13.0.0"
+  model_config_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_unknown_features: true
+    reject_missing_required_fields: true
+    reject_duplicate_feature_names: true
+    reject_duplicate_input_names: true
+    reject_duplicate_output_names: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    maximum_tested_pipeline_version: "13.x"
+    inference_contract_version: "1.1.0"
+    feature_schema_version: "1.1.0"
+    preprocessing_schema_version: "1.1.0"
+    calibration_schema_version: "1.0.0"
+    threshold_schema_version: "1.0.0"
+    artifact_manifest_version: "1.1.0"
+
+  validation:
+    validate_at_startup: true
+    validate_before_training: true
+    validate_before_export: true
+    validate_before_promotion: true
+    fail_on_invalid_configuration: true
+
+
+# ==============================================================================
+# 1. MODEL IDENTITY
+# ==============================================================================
+
+model:
+
+  id: "attachment_classifier"
+
+  name: "PhishGuard Multi-Modal Attachment Threat Classifier"
+
+  pipeline_version: "13.0.0"
+
+  model_contract_version: "1.1.0"
+
+  artifact_version: "1.0.0"
+
+  type: "hybrid_transformer_tabular_byte"
+
+  task:
+    type: "binary_classification"
+
+    labels:
+      0: "benign"
+      1: "malicious"
+
+    positive_class: 1
+
+    output_semantics: "probability_of_malicious_attachment"
+
+    logit_output_semantics: "raw_pre_sigmoid_malicious_logit"
+
+  description: >
+    Multi-modal attachment classifier combining structural metadata,
+    byte-frequency distributions, and extracted macro/script text.
+    The model provides a calibrated ML risk signal for malicious attachment
+    detection. File parsing, decompression safety, YARA scanning, MIME
+    validation, sandboxing, and policy enforcement remain separate security
+    controls.
+
+  owner:
+    team: "PhishGuard Threat Intelligence & ML Engineering"
+    service: "attachment-threat-detection"
+
+  lifecycle:
+    status: "candidate"
+
+    allowed_statuses:
+      - "candidate"
+      - "validated"
+      - "staged"
+      - "production"
+      - "deprecated"
+      - "quarantined"
+
+    environments:
+      - "development"
+      - "test"
+      - "staging"
+      - "production"
+
+    production_approval_required: true
+
+  immutability:
+    prohibit_artifact_overwrite: true
+    prohibit_version_reuse: true
+    prohibit_in_place_mutation: true
+
+  identity:
+    require_model_id: true
+    require_model_version: true
+    require_artifact_hash: true
+    require_manifest_hash: true
+    require_feature_schema_hash: true
+    require_preprocessing_hash: true
+    require_tokenizer_hash: true
+    require_architecture_hash: true
+    require_training_config_hash: true
+
+
+# ==============================================================================
+# 2. DECISION & RISK POLICY
+# ==============================================================================
+
+decision:
+
+  output:
+
+    raw_model_output:
+      type: "logit"
+      shape: [1]
+
+    probability_transform: "sigmoid"
+
+    calibrated_probability:
+      enabled: true
+      source: "calibration_artifact"
+
+  default_threshold:
+
+    value: 0.950
+
+    source: "validated_threshold_artifact"
+
+    fallback_allowed: true
+
+    fallback_source: "model_default"
+
+    fallback_must_be_logged: true
+
+    fallback_requires_alert: true
+
+  threshold_selection:
+
+    enabled: true
+
+    optimization_dataset: "validation"
+
+    forbidden_datasets:
+      - "test"
+      - "production"
+      - "feedback_unvalidated"
+
+    objective:
+
+      primary: "minimize_false_positive_rate"
+
+      secondary: "maximize_recall"
+
+    constraints:
+
+      minimum_precision: 0.998
+
+      minimum_recall: 0.930
+
+      maximum_false_positive_rate: 0.0005
+
+    persist_threshold_artifact: true
+
+    artifact:
+      filename: "attachment_classifier.threshold.json"
+      hash_algorithm: "sha256"
+
+  calibration:
+
+    enabled: true
+
+    method: "temperature_scaling"
+
+    fit_dataset: "validation"
+
+    forbidden_fit_datasets:
+      - "test"
+      - "production"
+
+    metrics:
+      - "brier_score"
+      - "expected_calibration_error"
+      - "negative_log_likelihood"
+
+    maximum_brier_score: 0.080
+
+    maximum_ece: 0.040
+
+    persist_artifact: true
+
+    artifact:
+      filename: "attachment_classifier.calibration.json"
+      hash_algorithm: "sha256"
+
+  abstention:
+
+    enabled: true
+
+    policy: "uncertainty_and_input_quality"
+
+    minimum_confidence: 0.60
+
+    maximum_confidence_for_abstention: 0.95
+
+    action: "sandbox_detonation_queue"
+
+    never_auto_block_on_abstention: true
+
+    never_auto_allow_on_abstention: true
+
+    reason_codes:
+      - "LOW_MODEL_CONFIDENCE"
+      - "INPUT_QUALITY_FAILURE"
+      - "UNSUPPORTED_FILE_TYPE"
+      - "FEATURE_EXTRACTION_PARTIAL"
+      - "OUT_OF_DISTRIBUTION"
+      - "RESOURCE_LIMIT"
+      - "MODEL_RUNTIME_DEGRADED"
+
+
+# ==============================================================================
+# 3. INPUT / DATA CONTRACT
+# ==============================================================================
+
+data_contract:
+
+  input_type: "parsed_attachment_payload"
+
+  required_fields:
+
+    - "attachment_id"
+    - "filename"
+    - "declared_mime_type"
+    - "detected_magic_mime_type"
+    - "file_size_bytes"
+    - "sha256"
+
+  optional_fields:
+
+    - "ssdeep"
+    - "imphash"
+    - "archive_depth"
+    - "parser_status"
+    - "macro_parser_status"
+    - "script_parser_status"
+    - "signature_status"
+
+  identity:
+
+    sha256:
+      required: true
+      algorithm: "sha256"
+      format: "hex_lowercase"
+      length: 64
+
+  privacy:
+
+    raw_payload_training_storage: false
+
+    raw_payload_logging: false
+
+    raw_payload_tracking: false
+
+    allowed_training_metadata:
+
+      - "derived_features"
+      - "byte_histogram"
+      - "tokenized_macro_script"
+      - "anonymized_labels"
+      - "attachment_type"
+      - "parser_status"
+
+    pii_redaction:
+      enabled: true
+
+    secrets_redaction:
+      enabled: true
+
+    credential_content_storage:
+      allowed: false
+
+  size_limits:
+
+    max_file_size_mb: 50
+
+    max_macro_script_characters: 500000
+
+    max_script_characters: 500000
+
+    max_archive_recursion_depth: 5
+
+    max_extracted_files: 100
+
+    max_archive_expanded_size_mb: 200
+
+    max_metadata_entries: 10000
+
+    max_parser_runtime_seconds: 10
+
+  encoding:
+
+    binary_input_required: true
+
+    text_decoding:
+      enabled: true
+      preferred:
+        - "utf-8"
+        - "utf-16"
+        - "latin-1"
+
+      invalid_encoding_action: "sanitize_and_record"
+
+      replacement_character_allowed: true
+
+  parser_trust:
+
+    derived_features_must_include_status: true
+
+    parser_failure_is_not_equal_to_zero: true
+
+    partial_extraction_must_be_flagged: true
+
+    unsupported_type_must_be_flagged: true
+
+  security_boundary:
+
+    unsafe_archive_extraction_allowed: false
+
+    recursive_extraction_performed_by_ml_pipeline: false
+
+    executable_execution_allowed: false
+
+    macro_execution_allowed: false
+
+    script_execution_allowed: false
+
+    network_access_during_feature_extraction: false
+
+    sandbox_required_for_dynamic_analysis: true
+
+
+# ==============================================================================
+# 4. FEATURE SCHEMA
+# ==============================================================================
+
+features:
+
+  schema:
+
+    version: "1.1.0"
+
+    ordering: "explicit"
+
+    hash_required: true
+
+    hash_algorithm: "sha256"
+
+    persist_feature_names: true
+
+    persist_feature_types: true
+
+    persist_normalization_parameters: true
+
+  # --------------------------------------------------------------------------
+  # 4.1 File Metadata Features
+  # --------------------------------------------------------------------------
+
+  file_metadata:
+
+    enabled: true
+
+    feature_group_id: "attachment_file_metadata_v1"
+
+    dense_features:
+
+      - name: "file_size_bytes_log1p"
+        type: "float32"
+        normalizer: "standard"
+        clip_min: 0.0
+        clip_max: 20.0
+        missing_policy: "fail"
+
+      - name: "shannon_entropy"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 8.0
+        missing_policy: "fail"
+
+      - name: "mime_mismatch"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "fail"
+
+      - name: "is_double_extension"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "has_embedded_macro"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "has_vba_autoexec"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "has_javascript_stream"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "has_pdf_launch_action"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "has_pdf_embedded_files"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "is_archive"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "fail"
+
+      - name: "archive_compression_ratio"
+        type: "float32"
+        normalizer: "robust"
+        clip_min: 0.0
+        clip_max: 1000.0
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "archive_encrypted_file_count"
+        type: "float32"
+        normalizer: "log1p_standard"
+        clip_min: 0.0
+        clip_max: 100000.0
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "is_executable"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "fail"
+
+      - name: "pe_has_digital_signature"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "pe_signature_valid"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+        missing_policy: "default_zero_with_quality_flag"
+
+      - name: "suspicious_section_name_count"
+        type: "float32"
+        normalizer: "min_max"
+        clip_min: 0.0
+        clip_max: 32.0
+        missing_policy: "default_zero_with_quality_flag"
+
+    total_features: 16
+
+    security_semantics:
+
+      digital_signature_is_not_trust_verdict: true
+
+      valid_signature_does_not_imply_benign: true
+
+      signature_validation_must_not_require_network: true
+
+  # --------------------------------------------------------------------------
+  # 4.2 Parser Quality Features
+  # --------------------------------------------------------------------------
+
+  parser_quality:
+
+    enabled: true
+
+    dense_features:
+
+      - name: "metadata_parser_success"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "macro_parser_success"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "script_parser_success"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "feature_extraction_complete"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+    total_features: 4
+
+  # --------------------------------------------------------------------------
+  # 4.3 Byte Histogram
+  # --------------------------------------------------------------------------
+
+  byte_histogram:
+
+    enabled: true
+
+    histogram_bins: 256
+
+    type: "float32"
+
+    normalizer: "l1_norm"
+
+    expected_sum: 1.0
+
+    sum_tolerance: 1.0e-5
+
+    finite_values_required: true
+
+    total_features: 256
+
+  # --------------------------------------------------------------------------
+  # 4.4 Extracted Code / Script Sequence
+  # --------------------------------------------------------------------------
+
+  text_sequence:
+
+    enabled: true
+
+    tokenizer:
+
+      family: "wordpiece"
+
+      model_name: "distilbert-base-uncased"
+
+      # DO NOT use "main" for production.
+      # Replace with an immutable approved commit hash during release.
+      revision: "${PHISHGUARD_ATTACHMENT_TOKENIZER_REVISION:PINNED_COMMIT_REQUIRED}"
+
+      revision_policy:
+        production_requires_immutable_revision: true
+        allowed_revision_types:
+          - "commit_hash"
+        reject_branch_names: true
+        reject_moving_tags: true
+
+      local_files_only_in_production: true
+
+      trust_remote_code: false
+
+      use_fast_tokenizer: true
+
+      vocabulary_size: 30522
+
+      lowercase: true
+
+      unicode_normalization: "NFKC"
+
+      special_tokens:
+
+        pad_token_id: 0
+        unk_token_id: 100
+        cls_token_id: 101
+        sep_token_id: 102
+
+      artifact_integrity:
+
+        tokenizer_files_hash_required: true
+
+        hash_algorithm: "sha256"
+
+        manifest_required: true
+
+    input_name: "macro_text_token_ids"
+
+    attention_mask_name: "macro_text_attention_mask"
+
+    max_sequence_length: 512
+
+    padding:
+
+      strategy: "max_length"
+
+      value: 0
+
+    truncation:
+
+      enabled: true
+
+      strategy: "longest_first"
+
+      side: "right"
+
+    long_content_policy:
+
+      enabled: true
+
+      strategy: "deterministic_multi_window"
+
+      window_length: 512
+
+      max_windows: 4
+
+      overlap_ratio: 0.25
+
+      aggregation: "max_risk"
+
+      require_window_count_feature: true
+
+      never_random_sample: true
+
+    content_sanitization:
+
+      normalize_unicode: true
+
+      remove_control_characters: true
+
+      preserve_newlines: true
+
+      preserve_string_literals: true
+
+      preserve_script_identifiers: true
+
+
+# ==============================================================================
+# 5. FEATURE VECTOR CONTRACT
+# ==============================================================================
+
+feature_vector:
+
+  version: "1.1.0"
+
+  components:
+
+    file_metadata:
+      dimension: 16
+
+    parser_quality:
+      dimension: 4
+
+    byte_histogram:
+      dimension: 256
+
+  total_tabular_dimension: 276
+
+  ordering:
+
+    strategy: "schema_order"
+
+    sequence:
+      - "file_metadata"
+      - "parser_quality"
+      - "byte_histogram"
+
+  dtype: "float32"
+
+  finite_required: true
+
+  reject_nan: true
+
+  reject_inf: true
+
+  feature_schema_hash_required: true
+
+
+# ==============================================================================
+# 6. PREPROCESSING CONTRACT
+# ==============================================================================
+
+preprocessing:
+
+  version: "1.1.0"
+
+  fit_statistics:
+
+    fit_on: "training_only"
+
+    persist: true
+
+    artifact: "attachment_preprocessing.json"
+
+    hash_algorithm: "sha256"
+
+    immutable: true
+
+  numerical:
+
+    dtype: "float32"
+
+    reject_nan: true
+
+    reject_inf: true
+
+    clipping:
+      enabled: true
+
+      before_normalization: true
+
+      after_normalization: true
+
+    missing_values:
+
+      strategy: "schema_defined"
+
+      reject_unexpected_missing: true
+
+      generate_missingness_flags: true
+
+  feature_order:
+
+    source: "feature_vector.ordering"
+
+    strict: true
+
+    reject_reordered_features: true
+
+  leakage_prevention:
+
+    enabled: true
+
+    prohibit_target_features: true
+
+    prohibit_analyst_decision_features: true
+
+    prohibit_future_information: true
+
+    prohibit_post_detection_features: true
+
+    prohibit_sandbox_verdict_features: true
+
+    prohibit_external_reputation_verdicts: true
+
+  parity:
+
+    training_and_inference_must_share_schema: true
+
+    training_and_inference_must_share_preprocessor: true
+
+    preprocessing_hash_required: true
+
+    feature_schema_hash_required: true
+
+
+# ==============================================================================
+# 7. DATASET SPLITTING & LEAKAGE CONTROLS
+# ==============================================================================
+
+dataset:
+
+  split:
+
+    train_ratio: 0.70
+
+    validation_ratio: 0.15
+
+    test_ratio: 0.15
+
+    ratio_tolerance: 1.0e-5
+
+    random_seed: 42
+
+    stratify_by_label: true
+
+    group_aware: true
+
+    require_group_key: true
+
+    group_keys:
+
+      preferred:
+        - "sha256"
+
+      optional:
+        - "ssdeep"
+        - "imphash"
+
+      missing_group_policy: "fallback_to_sha256"
+
+    temporal_split:
+
+      enabled: true
+
+      enforce_order: true
+
+      timestamp_field: "first_seen_timestamp"
+
+      test_must_be_newer_than_training: true
+
+      validation_must_not_overlap_test: true
+
+  deduplication:
+
+    exact_duplicates: true
+
+    exact_key: "sha256"
+
+    near_duplicates: true
+
+    ssdeep_similarity_threshold: 0.85
+
+    prohibit_cross_split_near_duplicates: true
+
+  label_policy:
+
+    allowed:
+
+      - "benign"
+      - "malicious"
+
+    reject_unknown_labels: true
+
+    require_label_source: true
+
+    require_label_timestamp: true
+
+    label_conflict_policy: "quarantine_for_review"
+
+  minimum_samples:
+
+    total: 15000
+
+    positive: 3000
+
+    negative: 8000
+
+  quality:
+
+    reject_empty_dataset: true
+
+    reject_nan: true
+
+    reject_inf: true
+
+    maximum_missing_ratio: 0.02
+
+    maximum_duplicate_ratio: 0.01
+
+    maximum_unknown_label_ratio: 0.0
+
+
+# ==============================================================================
+# 8. ARCHITECTURE
+# ==============================================================================
+
+architecture:
+
+  backbone:
+
+    name: "DistilBERT"
+
+    implementation: "HuggingFace"
+
+    model_name: "distilbert-base-uncased"
+
+    revision: "${PHISHGUARD_ATTACHMENT_MODEL_REVISION:PINNED_COMMIT_REQUIRED}"
+
+    revision_policy:
+
+      production_requires_immutable_revision: true
+
+      allowed_revision_types:
+        - "commit_hash"
+
+      reject_moving_revisions: true
+
+    local_files_only_in_production: true
+
+    trust_remote_code: false
+
+    hidden_size: 768
+
+    max_position_embeddings: 512
+
+    model_artifact_hash_required: true
+
+    model_config_hash_required: true
+
+    freeze:
+
+      enabled: true
+
+      strategy: "first_n_transformer_layers"
+
+      layers: 4
+
+  text_branch:
+
+    pooling:
+
+      strategy: "masked_mean"
+
+      output_dimension: 768
+
+      reject_all_padding: true
+
+    dropout: 0.20
+
+  tabular_branch:
+
+    # 16 file metadata
+    # + 4 parser quality
+    # + 256 byte histogram
+    input_dimension: 276
+
+    hidden_dimensions:
+      - 128
+      - 64
+
+    activation: "gelu"
+
+    normalization: "layer_norm"
+
+    dropout: 0.15
+
+  fusion:
+
+    strategy: "concat"
+
+    text_dimension: 768
+
+    tabular_dimension: 64
+
+    fused_dimension: 832
+
+  classification_head:
+
+    layers:
+      - 256
+      - 64
+
+    activation: "gelu"
+
+    normalization: "layer_norm"
+
+    dropout: 0.30
+
+    output_dimension: 1
+
+    final_activation: "none"
+
+    output_semantics: "logit"
+
+  architecture_contract:
+
+    hash_required: true
+
+    hash_algorithm: "sha256"
+
+    include:
+      - "backbone"
+      - "tokenizer"
+      - "feature_schema"
+      - "preprocessing"
+      - "layer_dimensions"
+      - "activation_functions"
+      - "pooling_strategy"
+
+
+# ==============================================================================
+# 9. TRAINING
+# ==============================================================================
+
+training:
+
+  batch_size: 32
+
+  epochs: 25
+
+  seed: 42
+
+  deterministic:
+
+    enabled: true
+
+    warn_only: false
+
+    capture_hardware: true
+
+    capture_framework_versions: true
+
+  optimizer:
+
+    name: "AdamW"
+
+    learning_rate: 0.00003
+
+    weight_decay: 0.01
+
+    eps: 1.0e-8
+
+  parameter_groups:
+
+    enabled: true
+
+    backbone_learning_rate: 0.00002
+
+    classifier_learning_rate: 0.00005
+
+    tabular_learning_rate: 0.00005
+
+  scheduler:
+
+    name: "cosine_with_warmup"
+
+    warmup_ratio: 0.10
+
+    minimum_learning_rate: 1.0e-7
+
+  loss:
+
+    name: "BCEWithLogitsLoss"
+
+    positive_class_weight: 5.0
+
+    label_smoothing: 0.0
+
+  regularization:
+
+    gradient_clipping:
+
+      enabled: true
+
+      max_norm: 1.0
+
+  early_stopping:
+
+    enabled: true
+
+    monitor: "validation_pr_auc"
+
+    mode: "max"
+
+    patience: 5
+
+    min_delta: 0.001
+
+  checkpointing:
+
+    enabled: true
+
+    save_best_only: true
+
+    monitor: "validation_pr_auc"
+
+    directory: "artifacts/checkpoints/attachment_classifier"
+
+    immutable: true
+
+    prohibit_overwrite: true
+
+  precision:
+
+    mode: "auto"
+
+    allowed:
+      - "fp32"
+      - "fp16"
+      - "bf16"
+
+    fallback_to_fp32: true
+
+  training_artifacts:
+
+    save_optimizer_state: true
+
+    save_scheduler_state: true
+
+    save_random_state: true
+
+    save_training_metadata: true
+
+    save_config_hash: true
+
+
+# ==============================================================================
+# 10. ADVERSARIAL ROBUSTNESS
+# ==============================================================================
+
+adversarial:
+
+  enabled: true
+
+  required_for_production: true
+
+  evaluation_must_not_modify_source_dataset: true
+
+  perturbations:
+
+    byte_padding:
+
+      enabled: true
+
+      techniques:
+        - "overlay_junk_bytes"
+        - "section_header_padding"
+
+    macro_obfuscation:
+
+      enabled: true
+
+      techniques:
+        - "variable_renaming"
+        - "string_concatenation_obfuscation"
+        - "dead_code_insertion"
+
+    archive_evasion:
+
+      enabled: true
+
+      techniques:
+        - "zip_comment_injection"
+        - "nested_archive_wrapping"
+
+    metadata_evasion:
+
+      enabled: true
+
+      techniques:
+        - "mime_spoofing"
+        - "filename_variation"
+        - "double_extension_variation"
+
+  evaluation:
+
+    preserve_ground_truth: true
+
+    require_attack_success_measurement: true
+
+    require_clean_vs_perturbed_comparison: true
+
+    require_per_attack_metrics: true
+
+  gates:
+
+    maximum_pr_auc_drop: 0.04
+
+    maximum_recall_drop: 0.04
+
+    maximum_false_positive_increase: 0.001
+
+    fail_on_critical_regression: true
+
+
+# ==============================================================================
+# 11. OUT-OF-DISTRIBUTION & INPUT QUALITY
+# ==============================================================================
+
+input_quality:
+
+  enabled: true
+
+  required_for_production: true
+
+  reject_invalid_tensor_shape: true
+
+  reject_invalid_dtype: true
+
+  reject_nan: true
+
+  reject_inf: true
+
+  reject_invalid_token_ids: true
+
+  reject_invalid_attention_mask: true
+
+  reject_invalid_histogram_sum: true
+
+  minimum_parser_success_ratio: 0.75
+
+  maximum_missing_feature_ratio: 0.05
+
+  unsupported_file_policy: "abstain"
+
+  partial_extraction_policy: "abstain"
+
+  suspicious_input_quality_policy: "sandbox"
+
+  out_of_distribution:
+
+    enabled: true
+
+    detection_method: "feature_distance"
+
+    reference_dataset: "training"
+
+    threshold_source: "validation"
+
+    persist_threshold: true
+
+    action: "abstain"
+
+    never_auto_allow_ood: true
+
+
+# ==============================================================================
+# 12. ONNX EXPORT CONTRACT
+# ==============================================================================
+
+onnx_export:
+
+  enabled: true
+
+  target_format: "onnx"
+
+  filenames:
+
+    raw: "attachment_classifier.onnx"
+
+    optimized: "attachment_classifier_opt.onnx"
+
+    quantized: "attachment_classifier_int8.onnx"
+
+  opset_version: 17
+
+  runtime:
+
+    minimum_version: "1.18.0"
+
+    execution_provider:
+
+      preferred:
+        - "CUDAExecutionProvider"
+        - "CPUExecutionProvider"
+
+      fallback:
+        - "CPUExecutionProvider"
+
+    provider_fallback_allowed: true
+
+    provider_fallback_must_be_logged: true
+
+  inputs:
+
+    - name: "macro_text_token_ids"
+      shape: ["batch_size", 512]
+      data_type: "int64"
+
+    - name: "macro_text_attention_mask"
+      shape: ["batch_size", 512]
+      data_type: "int64"
+
+    - name: "tabular_and_byte_features"
+      shape: ["batch_size", 276]
+      data_type: "float32"
+
+  outputs:
+
+    - name: "malicious_logit"
+      shape: ["batch_size", 1]
+      data_type: "float32"
+
+  output_semantics:
+
+    type: "logit"
+
+    probability_transform: "sigmoid"
+
+    calibration_required: true
+
+    threshold_required: true
+
+  dynamic_axes:
+
+    macro_text_token_ids:
+      0: "batch_size"
+
+    macro_text_attention_mask:
+      0: "batch_size"
+
+    tabular_and_byte_features:
+      0: "batch_size"
+
+    malicious_logit:
+      0: "batch_size"
+
+  validation:
+
+    run_onnx_checker: true
+
+    verify_input_schema: true
+
+    verify_output_schema: true
+
+    verify_input_dtype: true
+
+    verify_output_dtype: true
+
+    verify_finite_outputs: true
+
+    run_smoke_test: true
+
+    verify_numerical_parity: true
+
+    verify_probability_transform: true
+
+    verify_calibration_artifact: true
+
+    verify_threshold_artifact: true
+
+    parity:
+
+      rtol: 0.001
+
+      atol: 0.0001
+
+      validation_samples: 500
+
+      fail_on_mismatch: true
+
+  quantization:
+
+    enabled: true
+
+    method: "dynamic_int8"
+
+    require_accuracy_validation: true
+
+    maximum_pr_auc_drop: 0.005
+
+    maximum_recall_drop: 0.005
+
+    maximum_fpr_increase: 0.0005
+
+    allow_fallback_to_fp32: true
+
+    fallback_requires_gate_revalidation: true
+
+  resource_limits:
+
+    latency_budget_ms:
+
+      p50: 30.0
+
+      p95: 50.0
+
+      p99: 80.0
+
+    batch_size_for_latency_test: 1
+
+    maximum_memory_mb: 512
+
+    maximum_model_size_mb: 512
+
+    benchmark_environment_required: true
+
+    benchmark_warmup_iterations: 50
+
+    benchmark_measurement_iterations: 200
+
+
+# ==============================================================================
+# 13. MODEL QUALITY GATES
+# ==============================================================================
+
+quality_gates:
+
+  required: true
+
+  evaluation_dataset: "unseen_test"
+
+  classification:
+
+    min_precision: 0.998
+
+    min_recall: 0.930
+
+    min_f1: 0.962
+
+    min_roc_auc: 0.994
+
+    min_pr_auc: 0.975
+
+    max_false_positive_rate: 0.0005
+
+    max_false_negative_rate: 0.070
+
+  calibration:
+
+    enabled: true
+
+    max_brier_score: 0.080
+
+    max_expected_calibration_error: 0.040
+
+  regression:
+
+    enabled: true
+
+    compare_against_production_model: true
+
+    maximum_pr_auc_drop: 0.01
+
+    maximum_recall_drop: 0.01
+
+    maximum_fpr_increase: 0.0005
+
+  failure_policy:
+
+    fail_closed: true
+
+    prohibit_production_promotion: true
+
+    quarantine_failed_artifact: true
+
+    require_gate_report: true
+
+
+# ==============================================================================
+# 14. PROVENANCE & ARTIFACT SECURITY
+# ==============================================================================
+
+provenance:
+
+  required: true
+
+  manifest:
+
+    enabled: true
+
+    filename: "attachment_classifier.manifest.json"
+
+    hash_algorithm: "sha256"
+
+    include:
+
+      - "model_id"
+      - "model_version"
+      - "artifact_hash"
+      - "feature_schema_hash"
+      - "preprocessing_hash"
+      - "tokenizer_hash"
+      - "architecture_hash"
+      - "training_config_hash"
+      - "dataset_version"
+      - "dataset_manifest_hash"
+      - "git_commit"
+      - "dependency_lock_hash"
+      - "framework_version"
+      - "exporter_version"
+      - "onnx_opset"
+      - "calibration_artifact_hash"
+      - "threshold_artifact_hash"
+
+  signing:
+
+    enabled: true
+
+    algorithm: "ed25519"
+
+    key_reference_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+    production_signature_required: true
+
+    signature_verification_required_before_load: true
+
+  reproducibility:
+
+    capture_environment: true
+
+    capture_python_version: true
+
+    capture_os: true
+
+    capture_cpu: true
+
+    capture_gpu: true
+
+    capture_framework_versions: true
+
+    capture_dependency_lock: true
+
+    capture_git_commit: true
+
+    capture_config_hash: true
+
+    capture_dataset_version: true
+
+
+# ==============================================================================
+# 15. ARTIFACTS
+# ==============================================================================
+
+artifacts:
+
+  directories:
+
+    checkpoint: "artifacts/checkpoints/attachment_classifier"
+
+    exported: "artifacts/exported/attachment_classifier"
+
+    reports: "artifacts/reports/attachment_classifier"
+
+    quarantine: "artifacts/quarantine/attachment_classifier"
+
+  immutable: true
+
+  prohibit_overwrite: true
+
+  require_content_hash: true
+
+  hash_algorithm: "sha256"
+
+  quarantine_on_failure: true
+
+  required_files:
+
+    - "attachment_classifier.onnx"
+    - "attachment_classifier.manifest.json"
+    - "attachment_preprocessing.json"
+    - "attachment_classifier.calibration.json"
+    - "attachment_classifier.threshold.json"
+
+  optional_files:
+
+    - "attachment_classifier_int8.onnx"
+
+    - "attachment_classifier_opt.onnx"
+
+    - "tokenizer.json"
+
+    - "tokenizer_config.json"
+
+    - "special_tokens_map.json"
+
+  permissions:
+
+    model_read_only_after_validation: true
+
+    prohibit_world_writable: true
+
+    prohibit_symlinks_for_production_artifacts: true
+
+
+# ==============================================================================
+# 16. PRODUCTION PROMOTION
+# ==============================================================================
+
+promotion:
+
+  enabled: true
+
+  strategy: "gated"
+
+  development:
+
+    require_quality_gates: false
+
+  staging:
+
+    require_quality_gates: true
+
+    require_adversarial_evaluation: true
+
+    require_onnx_validation: true
+
+  production:
+
+    require_quality_gates: true
+
+    require_adversarial_evaluation: true
+
+    require_calibration_validation: true
+
+    require_threshold_validation: true
+
+    require_onnx_validation: true
+
+    require_signature: true
+
+    require_provenance: true
+
+    require_reproducibility_metadata: true
+
+    require_human_approval: true
+
+    immutable_artifacts: true
+
+    atomic_promotion: true
+
+    prohibit_direct_registry_write: true
+
+
+# ==============================================================================
+# 17. ROLLBACK & FAILURE HANDLING
+# ==============================================================================
+
+rollback:
+
+  enabled: true
+
+  automatic: false
+
+  retain_versions: 3
+
+  require_previous_known_good_model: true
+
+  triggers:
+
+    artifact_integrity_failure: true
+
+    signature_failure: true
+
+    runtime_validation_failure: true
+
+    quality_gate_failure: true
+
+    calibration_failure: true
+
+    severe_drift: true
+
+    latency_budget_failure: true
+
+  quarantine_failed_model: true
+
+  never_delete_known_good_model_automatically: true
+
+
+# ==============================================================================
+# 18. MONITORING & DRIFT CONTRACT
+# ==============================================================================
+
+monitoring:
+
+  enabled: true
+
+  metrics:
+
+    prediction_distribution: true
+
+    feature_distribution: true
+
+    input_quality: true
+
+    abstention_rate: true
+
+    parser_failure_rate: true
+
+    latency: true
+
+    error_rate: true
+
+    provider_fallback_rate: true
+
+  drift:
+
+    enabled: true
+
+    prediction_drift: true
+
+    feature_drift: true
+
+    concept_drift: true
+
+    threshold_source: "validation"
+
+    psi:
+
+      warning: 0.10
+
+      critical: 0.25
+
+  alerts:
+
+    alert_on_critical_drift: true
+
+    alert_on_abstention_spike: true
+
+    alert_on_parser_failure_spike: true
+
+    alert_on_latency_budget_breach: true
+
+    alert_on_model_provider_fallback: true
+
+
+# ==============================================================================
+# 19. SECURITY CONSTRAINTS
+# ==============================================================================
+
+security:
+
+  secrets:
+
+    allowed_in_config: false
+
+    environment_variable_references_only: true
+
+  model_loading:
+
+    verify_signature_before_load: true
+
+    verify_hash_before_load: true
+
+    verify_manifest_before_load: true
+
+    reject_untrusted_artifacts: true
+
+  network:
+
+    training_network_access: false
+
+    inference_network_access: false
+
+    tokenizer_download_at_inference: false
+
+    model_download_at_inference: false
+
+  code_execution:
+
+    trust_remote_code: false
+
+    execute_attachment: false
+
+    execute_macro: false
+
+    execute_script: false
+
+    execute_embedded_object: false
+
+  filesystem:
+
+    restrict_artifact_paths: true
+
+    prohibit_path_traversal: true
+
+    prohibit_symlink_escape: true
+
+
+# ==============================================================================
+# 20. CONFIGURATION VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  startup_validation: true
+
+  strict_schema_validation: true
+
+  validate_model_identity: true
+
+  validate_feature_count: true
+
+  validate_feature_order: true
+
+  validate_feature_types: true
+
+  validate_feature_ranges: true
+
+  validate_input_dimensions: true
+
+  validate_output_dimensions: true
+
+  validate_label_mapping: true
+
+  validate_tokenizer_identity: true
+
+  validate_tokenizer_revision: true
+
+  validate_model_revision: true
+
+  validate_preprocessing_contract: true
+
+  validate_onnx_contract: true
+
+  validate_onnx_opset: true
+
+  validate_quality_gates: true
+
+  validate_calibration_contract: true
+
+  validate_threshold_contract: true
+
+  validate_artifact_manifest: true
+
+  validate_artifact_hashes: true
+
+  validate_signature: true
+
+  validate_provenance: true
+
+  fail_on_invalid_configuration: true
+
+  fail_on_contract_mismatch: true

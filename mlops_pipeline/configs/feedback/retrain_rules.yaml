@@ -1,0 +1,1949 @@
+# ==============================================================================
+# PhishGuard_AI - Retraining Rules & Trigger Policy Specification
+# Version: 13.0.0
+# File Path: mlops_pipeline/configs/feedback/retrain_rules.yaml
+#
+# Purpose
+# -------
+# Production-grade closed-loop retraining governance contract controlling:
+#
+#   observation
+#       -> trigger detection
+#       -> trigger qualification
+#       -> dataset eligibility
+#       -> immutable snapshot
+#       -> anti-poisoning validation
+#       -> training
+#       -> evaluation
+#       -> adversarial evaluation
+#       -> fairness/slice evaluation
+#       -> champion/challenger comparison
+#       -> canary/shadow validation
+#       -> promotion or quarantine
+#
+# Scope
+# -----
+# - email_classifier
+# - url_classifier
+# - attachment_classifier
+#
+# Design principles
+# -----------------
+# - fail closed
+# - zero-trust feedback ingestion
+# - immutable training snapshots
+# - reproducible retraining
+# - champion/challenger isolation
+# - no automatic promotion on trigger alone
+# - explicit drift persistence/debouncing
+# - anti-poisoning controls
+# - training-serving skew protection
+# - artifact provenance
+# - rollback safety
+# - resource/cost protection
+#
+# IMPORTANT
+# ---------
+# This configuration MUST NOT contain:
+# - secrets
+# - API keys
+# - private keys
+# - credentials
+# - raw email bodies
+# - raw attachment payloads
+# - authentication tokens
+# - private customer data
+# ==============================================================================
+
+
+# ==============================================================================
+# 0. SCHEMA & COMPATIBILITY CONTRACT
+# ==============================================================================
+
+schema:
+  schema_version: "1.0.0"
+  config_version: "13.0.0"
+  policy_contract_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_unknown_models: true
+    reject_unknown_trigger_types: true
+    reject_unknown_dataset_sources: true
+    reject_missing_required_fields: true
+    reject_invalid_types: true
+    reject_invalid_ranges: true
+    reject_duplicate_feature_names: true
+    reject_duplicate_trigger_ids: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    maximum_supported_pipeline_version: "13.x"
+    retraining_engine_version: "1.0.0"
+    minimum_evaluation_engine_version: "1.0.0"
+    minimum_adversarial_engine_version: "1.0.0"
+    minimum_fairness_engine_version: "1.0.0"
+
+  required_contracts:
+    - "configs/evaluation/evaluation_gates.yaml"
+    - "configs/evaluation/adversarial_gates.yaml"
+    - "configs/evaluation/fairness_gates.yaml"
+
+  configuration_integrity:
+    require_config_hash: true
+    hash_algorithm: "sha256"
+
+
+# ==============================================================================
+# 1. GLOBAL RETRAINING GOVERNANCE
+# ==============================================================================
+
+global_retrain_policy:
+
+  policy_id: "global_retrain_policy_v13"
+
+  orchestrator:
+    name: "PhishGuard_MLOps_Feedback_Engine"
+    mode: "event_driven_with_scheduled_evaluation"
+
+  enabled: true
+
+  environments:
+    development:
+      enabled: true
+      automatic_training: true
+      automatic_promotion: false
+
+    test:
+      enabled: true
+      automatic_training: true
+      automatic_promotion: false
+
+    staging:
+      enabled: true
+      automatic_training: true
+      automatic_promotion: false
+
+    production:
+      enabled: true
+      automatic_training: true
+      automatic_promotion: false
+
+  failure_mode:
+    policy: "fail_closed"
+    unknown_state: "block"
+    evaluation_failure: "block"
+    provenance_failure: "block"
+    dataset_integrity_failure: "block"
+    artifact_integrity_failure: "block"
+
+  # --------------------------------------------------------------------------
+  # Retraining must never be allowed to directly mutate the production model.
+  # --------------------------------------------------------------------------
+
+  isolation:
+    production_artifact_read_only: true
+    champion_immutable: true
+    challenger_isolated: true
+    training_workspace_isolated: true
+    temporary_artifacts_outside_production_registry: true
+
+  # --------------------------------------------------------------------------
+  # Global cooldowns
+  # --------------------------------------------------------------------------
+
+  cooldown_controls:
+
+    global_minimum_cooldown_hours: 24
+
+    model_specific_cooldown_hours:
+      email_classifier: 48
+      url_classifier: 24
+      attachment_classifier: 48
+
+    duplicate_trigger_suppression_hours: 12
+
+    max_retrains_per_24h: 2
+    max_retrains_per_7d: 6
+
+    max_retrains_per_model_7d:
+      email_classifier: 3
+      url_classifier: 4
+      attachment_classifier: 3
+
+    emergency_bypass:
+      enabled: true
+      bypass_global_cooldown: false
+      bypass_model_cooldown: false
+      require_secops_approval: true
+
+  # --------------------------------------------------------------------------
+  # Trigger arbitration
+  # --------------------------------------------------------------------------
+
+  trigger_arbitration:
+
+    enabled: true
+
+    priority_order:
+      - "critical_security_regression"
+      - "critical_false_negative"
+      - "performance_decay"
+      - "concept_drift"
+      - "persistent_feature_drift"
+      - "feedback_accumulation"
+      - "scheduled_cadence"
+
+    aggregation:
+      strategy: "priority_then_deduplicate"
+
+    multiple_simultaneous_triggers:
+      create_single_job: true
+      preserve_all_trigger_reasons: true
+      merge_evidence: true
+
+    minimum_trigger_confidence: 0.90
+
+  # --------------------------------------------------------------------------
+  # Dataset governance
+  # --------------------------------------------------------------------------
+
+  dataset_governance:
+
+    require_verified_labels: true
+
+    unverified_feedback_policy:
+      allowed_in_feedback_store: true
+      allowed_in_training: false
+      allowed_in_validation: false
+      allowed_in_test: false
+      quarantine_pending_labels: true
+
+    max_unverified_label_ratio_for_training: 0.0
+
+    label_freshness:
+      enabled: true
+      preferred_max_age_days: 30
+      hard_max_age_days: 180
+      old_label_action: "exclude_from_incremental_training"
+
+    label_conflict_policy:
+      enabled: true
+      minimum_agreement_ratio: 0.95
+      conflicting_labels_action: "quarantine"
+      require_adjudication_for_critical_samples: true
+
+    duplicate_controls:
+      exact_duplicate_detection: true
+      near_duplicate_detection: true
+      duplicate_hash_algorithm: "sha256"
+
+    source_controls:
+      enabled: true
+      require_source_identity: true
+      require_source_trust_level: true
+
+      maximum_single_source_fraction: 0.40
+
+      allowed_sources:
+        - "soc_verified"
+        - "sandbox_verified"
+        - "threat_intelligence_verified"
+        - "user_report_verified"
+        - "automated_high_confidence"
+
+      minimum_source_diversity: 2
+
+    feedback_loop_protection:
+      enabled: true
+
+      prohibit_training_on_prediction_only_labels: true
+
+      require_independent_label_signal: true
+
+      minimum_independent_label_fraction: 0.50
+
+      detect_model_generated_labels: true
+
+      maximum_model_generated_label_fraction: 0.20
+
+    class_balance:
+      enabled: true
+
+      minimum_positive_fraction: 0.10
+      maximum_positive_fraction: 0.90
+
+      maximum_positive_shift_from_baseline: 0.10
+      maximum_negative_shift_from_baseline: 0.10
+
+      rebalance_action: "block_and_report"
+
+    contamination:
+      anti_poisoning_check: true
+
+      maximum_anomaly_contamination_rate: 0.0100
+
+      maximum_duplicate_rate: 0.0500
+
+      maximum_conflict_rate: 0.0200
+
+      maximum_outlier_rate: 0.0200
+
+      poisoning_action: "quarantine"
+
+    temporal_integrity:
+      enabled: true
+
+      require_event_timestamp: true
+      require_label_timestamp: true
+      require_label_after_event: true
+
+      prohibit_future_information: true
+
+    privacy:
+      raw_payload_training_storage: false
+      raw_payload_retraining_storage: false
+      pii_redaction_required: true
+      secrets_redaction_required: true
+
+  # --------------------------------------------------------------------------
+  # Immutable dataset snapshot policy
+  # --------------------------------------------------------------------------
+
+  dataset_snapshot:
+
+    required: true
+
+    immutable: true
+
+    content_addressed: true
+
+    hash_algorithm: "sha256"
+
+    required_manifest_fields:
+      - "dataset_id"
+      - "dataset_version"
+      - "dataset_hash"
+      - "feature_schema_version"
+      - "preprocessing_version"
+      - "label_schema_version"
+      - "source_summary"
+      - "sample_count"
+      - "positive_count"
+      - "negative_count"
+      - "creation_timestamp"
+      - "parent_dataset_id"
+
+    prohibit_mutation_after_snapshot: true
+
+    reproducibility:
+      require_snapshot_recreation_test: true
+      require_deterministic_ordering: true
+      random_seed: 42
+
+  # --------------------------------------------------------------------------
+  # Safety circuit breakers
+  # --------------------------------------------------------------------------
+
+  safety_circuit_breakers:
+
+    enabled: true
+
+    auto_rollback_on_failed_evaluation: true
+
+    auto_rollback_on_canary_failure: true
+
+    auto_rollback_on_post_deployment_regression: true
+
+    require_human_approval_for_emergency_trigger: true
+
+    require_human_approval_for_production_promotion: true
+
+    fail_closed: true
+
+    disable_retraining_on_repeated_failure:
+      enabled: true
+      consecutive_failures: 3
+      lockout_hours: 24
+
+    disable_model_after_repeated_regression:
+      enabled: true
+      regression_events: 3
+      window_days: 7
+      action: "freeze_and_require_manual_review"
+
+
+# ==============================================================================
+# 2. GLOBAL TRIGGER SEMANTICS
+# ==============================================================================
+
+trigger_semantics:
+
+  enabled: true
+
+  trigger_event_schema:
+
+    required_fields:
+      - "trigger_id"
+      - "model_id"
+      - "trigger_type"
+      - "observed_at"
+      - "reference_model_version"
+      - "reference_dataset_version"
+      - "metric"
+      - "observed_value"
+      - "baseline_value"
+      - "evidence_hash"
+
+  persistence:
+
+    enabled: true
+
+    minimum_consecutive_breaches: 2
+
+    observation_window_hours: 48
+
+    exception:
+      critical_security_regression: 1
+      critical_false_negative: 1
+
+  debounce:
+
+    enabled: true
+
+    minimum_observations_between_triggers: 2
+
+    repeated_identical_trigger_suppression_hours: 12
+
+  trigger_state_machine:
+
+    states:
+      - "observed"
+      - "qualified"
+      - "blocked_by_cooldown"
+      - "blocked_by_data_quality"
+      - "snapshot_created"
+      - "training_queued"
+      - "training_running"
+      - "evaluation_running"
+      - "candidate_rejected"
+      - "candidate_approved_for_canary"
+      - "canary_running"
+      - "promoted"
+      - "rolled_back"
+      - "quarantined"
+
+    terminal_states:
+      - "candidate_rejected"
+      - "promoted"
+      - "rolled_back"
+      - "quarantined"
+
+
+# ==============================================================================
+# 3. MODEL-SPECIFIC RETRAINING RULES
+# ==============================================================================
+
+models:
+
+  # ============================================================================
+  # 3.1 EMAIL CLASSIFIER
+  # ============================================================================
+
+  email_classifier:
+
+    enabled: true
+
+    model_id: "email_classifier"
+
+    pipeline_target:
+      type: "registered_pipeline_id"
+      id: "train_email_model"
+      executable_resolution: "pipeline_registry_only"
+      allow_arbitrary_paths: false
+
+    training_strategy:
+      default_mode: "fine_tuning"
+      emergency_mode: "fine_tuning"
+      full_retrain_allowed: true
+
+      full_retrain_required_after:
+        - "feature_schema_change"
+        - "tokenizer_change"
+        - "major_backbone_change"
+        - "preprocessing_contract_change"
+
+    baseline:
+
+      champion_required: true
+
+      required_artifacts:
+        - "model"
+        - "preprocessing"
+        - "feature_schema"
+        - "evaluation_report"
+        - "adversarial_report"
+        - "fairness_report"
+        - "manifest"
+
+      baseline_identity:
+        model_version_required: true
+        artifact_hash_required: true
+        preprocessing_hash_required: true
+        feature_schema_hash_required: true
+
+    triggers:
+
+      # ------------------------------------------------------------------------
+      # Performance decay
+      # ------------------------------------------------------------------------
+
+      performance_decay:
+
+        enabled: true
+
+        trigger_id: "email_performance_decay_v13"
+
+        evaluation_window_hours: 168
+
+        minimum_eval_samples: 5000
+
+        minimum_positive_samples: 1000
+
+        baseline_source: "production_champion"
+
+        conditions:
+
+          pr_auc_drop:
+            enabled: true
+            threshold: 0.0200
+            comparison: "absolute_drop"
+
+          recall_drop:
+            enabled: true
+            threshold: 0.0250
+            comparison: "absolute_drop"
+
+          fpr_increase:
+            enabled: true
+            threshold: 0.0005
+            comparison: "absolute_increase"
+
+          calibration_degradation:
+            enabled: true
+            ece_increase: 0.0200
+            brier_increase: 0.0200
+
+        trigger_logic:
+          strategy: "any_critical_or_two_standard_conditions"
+
+        persistence:
+          consecutive_breaches: 2
+
+      # ------------------------------------------------------------------------
+      # Feature drift
+      # ------------------------------------------------------------------------
+
+      drift_detection:
+
+        enabled: true
+
+        trigger_id: "email_feature_drift_v13"
+
+        check_frequency_hours: 12
+
+        reference:
+
+          dataset_id: "email_train_baseline_v13"
+
+          require_immutable_snapshot: true
+
+          require_feature_schema_match: true
+
+        minimum_reference_samples: 10000
+
+        minimum_current_samples: 5000
+
+        metrics:
+
+          psi:
+
+            enabled: true
+
+            threshold: 0.2500
+
+            warning_threshold: 0.1000
+
+            require_effect_size: true
+
+            minimum_affected_feature_fraction: 0.20
+
+            monitored_features:
+              - "auth_alignment_score"
+              - "display_name_spoofing_risk"
+              - "urgency_keyword_density"
+
+          ks_test:
+
+            enabled: true
+
+            p_value_threshold: 0.01
+
+            minimum_effect_size: 0.05
+
+            multiple_testing_correction:
+              enabled: true
+              method: "benjamini_hochberg"
+              false_discovery_rate: 0.05
+
+            monitored_features:
+              - "html_to_text_ratio"
+              - "suspicious_url_density"
+
+        trigger_logic:
+          strategy: "persistent_multi_feature_drift"
+
+        persistence:
+          consecutive_checks: 2
+
+      # ------------------------------------------------------------------------
+      # Concept drift
+      # ------------------------------------------------------------------------
+
+      concept_drift:
+
+        enabled: true
+
+        trigger_id: "email_concept_drift_v13"
+
+        evaluation_window_hours: 168
+
+        minimum_labeled_samples: 5000
+
+        conditions:
+
+          recall_degradation:
+            threshold: 0.0250
+
+          precision_degradation:
+            threshold: 0.0200
+
+          calibration_degradation:
+            ece_increase: 0.0200
+
+        trigger_logic:
+          strategy: "performance_confirmed"
+
+      # ------------------------------------------------------------------------
+      # Feedback accumulation
+      # ------------------------------------------------------------------------
+
+      feedback_accumulation:
+
+        enabled: true
+
+        trigger_id: "email_verified_feedback_v13"
+
+        check_frequency_hours: 6
+
+        minimum_verified_samples: 250
+
+        thresholds:
+
+          false_negatives:
+            min_verified: 150
+
+          false_positives:
+            min_verified: 50
+
+          critical_vip_false_positives:
+            emergency_threshold: 5
+
+        weighting:
+
+          false_negative_weight: 1.5
+
+          false_positive_weight: 1.0
+
+        emergency:
+
+          enabled: true
+
+          require_independent_verification: true
+
+          require_secops_approval: true
+
+      # ------------------------------------------------------------------------
+      # Scheduled cadence
+      # ------------------------------------------------------------------------
+
+      scheduled_cadence:
+
+        enabled: true
+
+        evaluation_frequency_hours: 24
+
+        minimum_model_age_days: 14
+
+        maximum_model_age_days: 21
+
+        hard_expiry_days: 45
+
+        scheduled_retraining_mode: "candidate_only"
+
+    retraining_dataset:
+
+      maximum_feedback_fraction: 0.30
+
+      minimum_new_verified_samples: 250
+
+      minimum_independent_sources: 2
+
+      temporal_window_days: 30
+
+      include_historical_training_data: true
+
+      historical_data_fraction:
+        minimum: 0.50
+        maximum: 0.90
+
+      feedback_sampling:
+        strategy: "stratified_by_label_source_slice"
+
+        preserve_critical_slices: true
+
+        preserve_hard_negatives: true
+
+    resource_limits:
+
+      maximum_training_hours: 4
+
+      maximum_gpu_hours: 8
+
+      maximum_memory_gb: 32
+
+      maximum_concurrent_jobs: 1
+
+
+  # ============================================================================
+  # 3.2 URL CLASSIFIER
+  # ============================================================================
+
+  url_classifier:
+
+    enabled: true
+
+    model_id: "url_classifier"
+
+    pipeline_target:
+      type: "registered_pipeline_id"
+      id: "train_url_model"
+      executable_resolution: "pipeline_registry_only"
+      allow_arbitrary_paths: false
+
+    training_strategy:
+      default_mode: "fine_tuning"
+      emergency_mode: "fine_tuning"
+      full_retrain_allowed: true
+
+      full_retrain_required_after:
+        - "feature_schema_change"
+        - "tokenizer_change"
+        - "preprocessing_contract_change"
+
+    baseline:
+
+      champion_required: true
+
+      baseline_identity:
+        model_version_required: true
+        artifact_hash_required: true
+        preprocessing_hash_required: true
+        feature_schema_hash_required: true
+
+    triggers:
+
+      performance_decay:
+
+        enabled: true
+
+        trigger_id: "url_performance_decay_v13"
+
+        evaluation_window_hours: 72
+
+        minimum_eval_samples: 10000
+
+        minimum_positive_samples: 2000
+
+        baseline_source: "production_champion"
+
+        conditions:
+
+          pr_auc_drop:
+            enabled: true
+            threshold: 0.0150
+
+          recall_drop:
+            enabled: true
+            threshold: 0.0200
+
+          fpr_increase:
+            enabled: true
+            threshold: 0.0010
+
+        trigger_logic:
+          strategy: "any_critical_or_two_standard_conditions"
+
+        persistence:
+          consecutive_breaches: 2
+
+      drift_detection:
+
+        enabled: true
+
+        trigger_id: "url_feature_drift_v13"
+
+        check_frequency_hours: 6
+
+        reference:
+
+          dataset_id: "url_train_baseline_v13"
+
+          require_immutable_snapshot: true
+
+          require_feature_schema_match: true
+
+        minimum_reference_samples: 20000
+
+        minimum_current_samples: 10000
+
+        metrics:
+
+          psi:
+
+            enabled: true
+
+            threshold: 0.2000
+
+            warning_threshold: 0.1000
+
+            require_effect_size: true
+
+            minimum_affected_feature_fraction: 0.20
+
+            monitored_features:
+              - "domain_age_days_log1p"
+              - "entropy_hostname"
+              - "suspicious_tld_score"
+
+        trigger_logic:
+          strategy: "persistent_multi_feature_drift"
+
+        persistence:
+          consecutive_checks: 2
+
+      concept_drift:
+
+        enabled: true
+
+        trigger_id: "url_concept_drift_v13"
+
+        evaluation_window_hours: 72
+
+        minimum_labeled_samples: 10000
+
+        conditions:
+
+          recall_degradation:
+            threshold: 0.0200
+
+          precision_degradation:
+            threshold: 0.0150
+
+        trigger_logic:
+          strategy: "performance_confirmed"
+
+      feedback_accumulation:
+
+        enabled: true
+
+        trigger_id: "url_verified_feedback_v13"
+
+        check_frequency_hours: 3
+
+        minimum_verified_samples: 500
+
+        thresholds:
+
+          false_negatives:
+            min_verified: 300
+
+          false_positives:
+            min_verified: 100
+
+          critical_false_positives:
+            emergency_threshold: 10
+
+        emergency:
+
+          enabled: true
+
+          require_independent_verification: true
+
+          require_secops_approval: true
+
+      scheduled_cadence:
+
+        enabled: true
+
+        evaluation_frequency_hours: 12
+
+        minimum_model_age_days: 7
+
+        maximum_model_age_days: 14
+
+        hard_expiry_days: 30
+
+        scheduled_retraining_mode: "candidate_only"
+
+    retraining_dataset:
+
+      maximum_feedback_fraction: 0.30
+
+      minimum_new_verified_samples: 500
+
+      minimum_independent_sources: 2
+
+      temporal_window_days: 14
+
+      include_historical_training_data: true
+
+      historical_data_fraction:
+        minimum: 0.60
+        maximum: 0.90
+
+      feedback_sampling:
+        strategy: "stratified_by_attack_family_source_slice"
+
+        preserve_hard_negatives: true
+
+        preserve_recent_domains: true
+
+    resource_limits:
+
+      maximum_training_hours: 4
+
+      maximum_gpu_hours: 8
+
+      maximum_memory_gb: 32
+
+      maximum_concurrent_jobs: 1
+
+
+  # ============================================================================
+  # 3.3 ATTACHMENT CLASSIFIER
+  # ============================================================================
+
+  attachment_classifier:
+
+    enabled: true
+
+    model_id: "attachment_classifier"
+
+    pipeline_target:
+      type: "registered_pipeline_id"
+      id: "train_attachment_model"
+      executable_resolution: "pipeline_registry_only"
+      allow_arbitrary_paths: false
+
+    training_strategy:
+      default_mode: "fine_tuning"
+      emergency_mode: "fine_tuning"
+      full_retrain_allowed: true
+
+      full_retrain_required_after:
+        - "feature_schema_change"
+        - "tokenizer_change"
+        - "preprocessing_contract_change"
+        - "byte_feature_definition_change"
+
+    baseline:
+
+      champion_required: true
+
+      baseline_identity:
+        model_version_required: true
+        artifact_hash_required: true
+        preprocessing_hash_required: true
+        feature_schema_hash_required: true
+
+    triggers:
+
+      performance_decay:
+
+        enabled: true
+
+        trigger_id: "attachment_performance_decay_v13"
+
+        evaluation_window_hours: 168
+
+        minimum_eval_samples: 3000
+
+        minimum_positive_samples: 600
+
+        baseline_source: "production_champion"
+
+        conditions:
+
+          pr_auc_drop:
+            enabled: true
+            threshold: 0.0200
+
+          recall_drop:
+            enabled: true
+            threshold: 0.0200
+
+          fpr_increase:
+            enabled: true
+            threshold: 0.0003
+
+        trigger_logic:
+          strategy: "any_critical_or_two_standard_conditions"
+
+        persistence:
+          consecutive_breaches: 2
+
+      drift_detection:
+
+        enabled: true
+
+        trigger_id: "attachment_feature_drift_v13"
+
+        check_frequency_hours: 24
+
+        reference:
+
+          dataset_id: "attachment_train_baseline_v13"
+
+          require_immutable_snapshot: true
+
+          require_feature_schema_match: true
+
+        minimum_reference_samples: 10000
+
+        minimum_current_samples: 5000
+
+        metrics:
+
+          psi:
+
+            enabled: true
+
+            threshold: 0.2500
+
+            warning_threshold: 0.1000
+
+            require_effect_size: true
+
+            minimum_affected_feature_fraction: 0.20
+
+            monitored_features:
+              - "shannon_entropy"
+              - "archive_compression_ratio"
+
+        trigger_logic:
+          strategy: "persistent_multi_feature_drift"
+
+        persistence:
+          consecutive_checks: 2
+
+      concept_drift:
+
+        enabled: true
+
+        trigger_id: "attachment_concept_drift_v13"
+
+        evaluation_window_hours: 168
+
+        minimum_labeled_samples: 3000
+
+        conditions:
+
+          recall_degradation:
+            threshold: 0.0200
+
+          precision_degradation:
+            threshold: 0.0150
+
+        trigger_logic:
+          strategy: "performance_confirmed"
+
+      feedback_accumulation:
+
+        enabled: true
+
+        trigger_id: "attachment_verified_feedback_v13"
+
+        check_frequency_hours: 12
+
+        minimum_verified_samples: 150
+
+        thresholds:
+
+          false_negatives:
+            min_verified: 100
+
+          false_positives:
+            min_verified: 30
+
+          critical_false_positives:
+            emergency_threshold: 3
+
+        emergency:
+
+          enabled: true
+
+          require_independent_verification: true
+
+          require_secops_approval: true
+
+      scheduled_cadence:
+
+        enabled: true
+
+        evaluation_frequency_hours: 24
+
+        minimum_model_age_days: 21
+
+        maximum_model_age_days: 30
+
+        hard_expiry_days: 60
+
+        scheduled_retraining_mode: "candidate_only"
+
+    retraining_dataset:
+
+      maximum_feedback_fraction: 0.30
+
+      minimum_new_verified_samples: 150
+
+      minimum_independent_sources: 2
+
+      temporal_window_days: 30
+
+      include_historical_training_data: true
+
+      historical_data_fraction:
+        minimum: 0.60
+        maximum: 0.90
+
+      feedback_sampling:
+        strategy: "stratified_by_file_family_source_slice"
+
+        preserve_hard_negatives: true
+
+        preserve_attack_families: true
+
+    resource_limits:
+
+      maximum_training_hours: 6
+
+      maximum_gpu_hours: 12
+
+      maximum_memory_gb: 48
+
+      maximum_concurrent_jobs: 1
+
+
+# ==============================================================================
+# 4. RETRAINING DATASET CONSTRUCTION
+# ==============================================================================
+
+dataset_construction:
+
+  enabled: true
+
+  pipeline:
+
+    stages:
+
+      - "collect_verified_feedback"
+      - "validate_schema"
+      - "validate_label_provenance"
+      - "deduplicate"
+      - "detect_conflicts"
+      - "detect_poisoning"
+      - "detect_outliers"
+      - "check_distribution"
+      - "check_temporal_integrity"
+      - "check_training_serving_skew"
+      - "construct_candidate_snapshot"
+      - "freeze_snapshot"
+
+  validation:
+
+    reject_nan: true
+    reject_inf: true
+
+    reject_schema_mismatch: true
+
+    reject_feature_schema_change: true
+
+    reject_label_schema_change: true
+
+  sampling:
+
+    deterministic: true
+
+    seed: 42
+
+    preserve_class_distribution: true
+
+    preserve_source_distribution: true
+
+    preserve_critical_slice_distribution: true
+
+    preserve_recent_attack_distribution: true
+
+  hard_negative_mining:
+
+    enabled: true
+
+    maximum_fraction_of_training_data: 0.20
+
+    require_independent_validation: true
+
+  feedback_weighting:
+
+    enabled: true
+
+    source_weights:
+
+      soc_verified: 1.00
+      sandbox_verified: 1.00
+      threat_intelligence_verified: 1.00
+      user_report_verified: 0.75
+      automated_high_confidence: 0.50
+
+    maximum_sample_weight: 2.0
+
+    normalize_weights: true
+
+
+# ==============================================================================
+# 5. ANTI-POISONING & DATA QUALITY GATES
+# ==============================================================================
+
+anti_poisoning:
+
+  enabled: true
+
+  required_before_training: true
+
+  integrity:
+
+    verify_dataset_hash: true
+
+    verify_parent_snapshot: true
+
+    verify_manifest_signature: true
+
+  label_quality:
+
+    minimum_verified_label_ratio: 1.0
+
+    maximum_conflicting_label_ratio: 0.0200
+
+    maximum_unresolved_label_ratio: 0.0
+
+  anomaly_detection:
+
+    enabled: true
+
+    maximum_contamination_rate: 0.0100
+
+    methods:
+      - "robust_feature_outlier_detection"
+      - "duplicate_cluster_detection"
+      - "label_conflict_detection"
+      - "distribution_shift_detection"
+
+  source_anomaly_detection:
+
+    enabled: true
+
+    detect_burst_submission: true
+
+    detect_single_source_label_flooding: true
+
+    detect_temporal_clustering: true
+
+  poisoning_response:
+
+    action: "quarantine_dataset"
+
+    notify_security_team: true
+
+    prohibit_training: true
+
+    preserve_for_forensic_analysis: true
+
+
+# ==============================================================================
+# 6. TRAINING EXECUTION CONTRACT
+# ==============================================================================
+
+execution_contract:
+
+  training_mode_policy:
+
+    allowed:
+      - "fine_tuning"
+      - "warm_start"
+      - "full_retrain"
+
+    default: "fine_tuning"
+
+    emergency_default: "fine_tuning"
+
+    full_retrain_conditions:
+      - "feature_schema_change"
+      - "tokenizer_change"
+      - "preprocessing_change"
+      - "backbone_change"
+      - "persistent_concept_drift"
+      - "repeated_candidate_failure"
+
+  hyperparameters:
+
+    inherit_base_hyperparameters: true
+
+    allow_unregistered_hyperparameter_changes: false
+
+    allow_hyperparameter_search: false
+
+    reduced_epochs: 10
+
+    maximum_epochs: 20
+
+    seed: 42
+
+  reproducibility:
+
+    deterministic: true
+
+    random_seed: 42
+
+    record_environment: true
+
+    record_python_version: true
+
+    record_framework_versions: true
+
+    record_dependency_lockfile_hash: true
+
+    record_training_code_commit: true
+
+    record_configuration_hash: true
+
+    record_dataset_hash: true
+
+  resource_limits:
+
+    maximum_concurrent_training_jobs: 2
+
+    global_gpu_hours_per_day: 24
+
+    global_cpu_hours_per_day: 96
+
+    maximum_memory_gb: 64
+
+    maximum_disk_gb: 200
+
+  timeout:
+
+    dataset_preparation_seconds: 1800
+
+    training_seconds: 21600
+
+    evaluation_seconds: 7200
+
+    total_job_seconds: 28800
+
+
+# ==============================================================================
+# 7. CHAMPION / CHALLENGER VALIDATION
+# ==============================================================================
+
+promotion_policy:
+
+  enabled: true
+
+  strategy: "champion_challenger"
+
+  challenger_required: true
+
+  champion_must_remain_available: true
+
+  absolute_quality_gates_required: true
+
+  relative_quality_gates_required: true
+
+  comparison_baseline:
+    source: "production_champion"
+    immutable: true
+
+  minimum_candidate_improvement:
+
+    enabled: true
+
+    primary_metric: "pr_auc"
+
+    minimum_improvement: 0.0020
+
+    allow_equal_if:
+      security_metric_improves: true
+      maximum_security_regression: 0.0
+
+  prohibited_regressions:
+
+    recall:
+      maximum_degradation: 0.0010
+
+    precision:
+      maximum_degradation: 0.0010
+
+    fpr:
+      maximum_increase: 0.0001
+
+    calibration:
+      maximum_ece_increase: 0.0050
+
+  required_gates:
+
+    evaluation: true
+    adversarial: true
+    fairness: true
+    calibration: true
+    ood: true
+    artifact_integrity: true
+    training_serving_skew: true
+
+  automatic_promotion:
+
+    enabled: false
+
+    reason: "Production promotion requires controlled deployment verification."
+
+  canary:
+
+    enabled: true
+
+    minimum_duration_hours: 24
+
+    traffic_percentages:
+      - 1
+      - 5
+      - 10
+      - 25
+      - 50
+
+    progression_requires_previous_stage_pass: true
+
+    automatic_rollback_on_failure: true
+
+  shadow_mode:
+
+    enabled: true
+
+    minimum_duration_hours: 12
+
+    compare_champion_and_challenger: true
+
+    record_prediction_disagreement: true
+
+  rollback:
+
+    enabled: true
+
+    restore_previous_champion: true
+
+    maximum_rollback_time_seconds: 300
+
+    verify_rollback_artifact_hash: true
+
+
+# ==============================================================================
+# 8. TRAINING-SERVING SKEW VALIDATION
+# ==============================================================================
+
+training_serving_skew:
+
+  enabled: true
+
+  required_for_retraining: true
+
+  schema:
+
+    require_identical_feature_schema: true
+
+    require_identical_preprocessing_version: true
+
+    require_identical_tokenization_contract: true
+
+  numerical:
+
+    maximum_mean_absolute_difference: 0.01
+
+    maximum_distribution_shift: 0.05
+
+  categorical:
+
+    maximum_category_mismatch_rate: 0.01
+
+  missing_values:
+
+    maximum_missing_rate_difference: 0.01
+
+  action_on_failure: "block_training"
+
+
+# ==============================================================================
+# 9. EVALUATION & SAFETY GATES
+# ==============================================================================
+
+validation_gate:
+
+  enforce_evaluation_gates: true
+
+  enforce_adversarial_gates: true
+
+  enforce_fairness_gates: true
+
+  enforce_ood_gates: true
+
+  enforce_calibration_gates: true
+
+  enforce_training_serving_skew_gates: true
+
+  enforce_artifact_integrity_gates: true
+
+  gate_config_directory: "configs/evaluation"
+
+  required_gate_files:
+
+    - "evaluation_gates.yaml"
+    - "adversarial_gates.yaml"
+    - "fairness_gates.yaml"
+
+  failed_gate_action:
+    candidate_status: "rejected"
+
+    artifact_action: "quarantine"
+
+    production_promotion: "prohibited"
+
+    notify_security_team: true
+
+
+# ==============================================================================
+# 10. POST-TRAINING OBSERVATION
+# ==============================================================================
+
+post_training_monitoring:
+
+  enabled: true
+
+  required_after_promotion: true
+
+  observation_windows:
+
+    short_term:
+      duration_hours: 24
+
+    medium_term:
+      duration_days: 7
+
+    long_term:
+      duration_days: 30
+
+  monitored_metrics:
+
+    - "precision"
+    - "recall"
+    - "fpr"
+    - "fnr"
+    - "pr_auc"
+    - "prediction_distribution"
+    - "feature_drift"
+    - "calibration"
+    - "slice_performance"
+    - "latency"
+    - "error_rate"
+
+  rollback_conditions:
+
+    enabled: true
+
+    critical_metric_regression: true
+
+    drift_spike: true
+
+    calibration_failure: true
+
+    slice_failure: true
+
+    security_incident: true
+
+
+# ==============================================================================
+# 11. ARTIFACT & PROVENANCE CONTRACT
+# ==============================================================================
+
+provenance:
+
+  required: true
+
+  manifest:
+
+    enabled: true
+
+    required: true
+
+    filename_pattern: "{model_id}.retraining.manifest.json"
+
+  required_fields:
+
+    - "model_id"
+    - "candidate_version"
+    - "champion_version"
+    - "trigger_id"
+    - "trigger_type"
+    - "trigger_timestamp"
+    - "dataset_id"
+    - "dataset_version"
+    - "dataset_hash"
+    - "feature_schema_version"
+    - "preprocessing_version"
+    - "training_code_commit"
+    - "configuration_hash"
+    - "dependency_lockfile_hash"
+    - "training_environment"
+    - "random_seed"
+    - "evaluation_report_hash"
+    - "adversarial_report_hash"
+    - "fairness_report_hash"
+    - "artifact_hash"
+
+  artifact_integrity:
+
+    hash_algorithm: "sha256"
+
+    verify_before_registry_write: true
+
+    verify_after_registry_write: true
+
+    prohibit_overwrite: true
+
+    prohibit_version_reuse: true
+
+  signing:
+
+    required_for_production: true
+
+    algorithm: "ed25519"
+
+    key_reference_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+    private_key_storage_in_config: false
+
+
+# ==============================================================================
+# 12. QUARANTINE POLICY
+# ==============================================================================
+
+quarantine:
+
+  enabled: true
+
+  immutable: true
+
+  directories:
+
+    failed_dataset:
+      path: "artifacts/quarantine/retraining/datasets"
+
+    failed_candidate:
+      path: "artifacts/quarantine/retraining/candidates"
+
+    failed_evaluation:
+      path: "artifacts/quarantine/retraining/evaluations"
+
+    failed_artifact:
+      path: "artifacts/quarantine/retraining/artifacts"
+
+  required_metadata:
+
+    - "quarantine_id"
+    - "model_id"
+    - "trigger_id"
+    - "failure_reason"
+    - "dataset_hash"
+    - "artifact_hash"
+    - "timestamp"
+
+  prohibit_automatic_reuse: true
+
+  require_manual_release: true
+
+
+# ==============================================================================
+# 13. REPORTING, AUDIT & OBSERVABILITY
+# ==============================================================================
+
+reporting:
+
+  enabled: true
+
+  generate_json_summary: true
+
+  generate_markdown_report: true
+
+  generate_machine_readable_gate_status: true
+
+  output_directory: "artifacts/reports/retraining_triggers"
+
+  report_filenames:
+
+    trigger_status: "retrain_trigger_status.json"
+
+    execution_summary: "retrain_execution_summary.json"
+
+    execution_log: "retrain_execution.log"
+
+    dataset_manifest: "retrain_dataset_manifest.json"
+
+    provenance_manifest: "retrain_provenance_manifest.json"
+
+  required_provenance_keys:
+
+    - "model_id"
+    - "trigger_id"
+    - "trigger_type"
+    - "trigger_timestamp"
+    - "trigger_evidence"
+    - "reference_model_version"
+    - "reference_model_hash"
+    - "reference_dataset_version"
+    - "reference_dataset_hash"
+    - "candidate_dataset_version"
+    - "candidate_dataset_hash"
+    - "drift_metrics"
+    - "performance_metrics"
+    - "feedback_counts"
+    - "data_quality_results"
+    - "poisoning_scan_results"
+    - "training_job_id"
+    - "candidate_version"
+    - "evaluation_status"
+    - "adversarial_status"
+    - "fairness_status"
+    - "promotion_status"
+
+  audit:
+
+    enabled: true
+
+    append_only: true
+
+    require_trigger_event_id: true
+
+    require_job_id: true
+
+    require_actor_identity: true
+
+    record_configuration_hash: true
+
+    record_dataset_hash: true
+
+    record_artifact_hash: true
+
+
+# ==============================================================================
+# 14. ALERTING
+# ==============================================================================
+
+alerting:
+
+  enabled: true
+
+  channels:
+
+    retrain_triggered:
+      severity: "info"
+
+    emergency_trigger:
+      severity: "critical"
+
+    dataset_poisoning:
+      severity: "critical"
+
+    repeated_training_failure:
+      severity: "high"
+
+    candidate_rejected:
+      severity: "warning"
+
+    automatic_rollback:
+      severity: "critical"
+
+    configuration_failure:
+      severity: "critical"
+
+  suppress_duplicate_alerts_hours: 12
+
+
+# ==============================================================================
+# 15. ORCHESTRATION & EXIT CONTRACT
+# ==============================================================================
+
+execution:
+
+  scheduler:
+
+    enabled: true
+
+    heartbeat_seconds: 60
+
+    trigger_poll_interval_seconds: 60
+
+  timeout_seconds: 28800
+
+  parallel_models: true
+
+  max_parallel_model_jobs: 2
+
+  worker_limits:
+
+    max_workers: 4
+
+  locking:
+
+    enabled: true
+
+    distributed_lock_required: true
+
+    lock_scope: "model_id"
+
+    stale_lock_timeout_seconds: 1800
+
+  idempotency:
+
+    enabled: true
+
+    require_idempotency_key: true
+
+    key_components:
+      - "model_id"
+      - "trigger_id"
+      - "dataset_hash"
+      - "champion_version"
+
+  retry:
+
+    enabled: true
+
+    max_attempts: 2
+
+    retryable_failures:
+      - "transient_compute_failure"
+      - "temporary_storage_failure"
+      - "temporary_registry_unavailable"
+
+    non_retryable_failures:
+      - "dataset_poisoning"
+      - "schema_mismatch"
+      - "evaluation_gate_failure"
+      - "artifact_integrity_failure"
+      - "configuration_error"
+
+  cli_exit_codes:
+
+    success_retrain_triggered: 0
+
+    no_retrain_required: 100
+
+    trigger_blocked_by_cooldown: 101
+
+    dataset_quality_failure: 102
+
+    poisoning_detected: 103
+
+    training_failure: 104
+
+    evaluation_gate_failure: 105
+
+    adversarial_gate_failure: 106
+
+    fairness_gate_failure: 107
+
+    candidate_rejected: 108
+
+    canary_failure: 109
+
+    rollback_executed: 110
+
+    configuration_validation_error: 2
+
+    system_error: 3
+
+
+# ==============================================================================
+# 16. FINAL CONFIGURATION VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  startup_validation: true
+
+  strict_schema_validation: true
+
+  validate_model_ids: true
+
+  validate_trigger_ids: true
+
+  validate_threshold_ranges: true
+
+  validate_cooldown_ranges: true
+
+  validate_dataset_references: true
+
+  validate_dataset_snapshot_contract: true
+
+  validate_feature_schema_references: true
+
+  validate_pipeline_registry_references: true
+
+  validate_gate_config_references: true
+
+  validate_training_serving_skew_contract: true
+
+  validate_resource_limits: true
+
+  validate_exit_codes: true
+
+  validate_provenance_contract: true
+
+  validate_artifact_contract: true
+
+  validate_security_policy: true
+
+  validate_no_secrets: true
+
+  validate_no_raw_payloads: true
+
+  fail_on_invalid_configuration: true
+
+  fail_closed_on_validation_error: true

@@ -1,0 +1,2131 @@
+# ==============================================================================
+# PhishGuard_AI - Global MLOps Pipeline Configuration
+# Version: 12.0.0
+#
+# Purpose
+# -------
+# Central configuration contract for the complete PhishGuard_AI ML lifecycle:
+#
+#   dataset acquisition
+#       -> validation
+#       -> leakage prevention
+#       -> preprocessing
+#       -> training
+#       -> evaluation
+#       -> adversarial testing
+#       -> fairness/calibration testing
+#       -> ONNX export
+#       -> artifact verification
+#       -> signing
+#       -> registry publication
+#       -> gated promotion
+#       -> deployment
+#       -> monitoring
+#       -> feedback
+#       -> retraining
+#
+# Security Model
+# --------------
+# - Secrets are NEVER stored in this file.
+# - Production promotion is fail-closed.
+# - Artifacts are immutable after validation.
+# - Model identity is bound to artifact + schema + configuration.
+# - Training data must be provenance-aware and integrity-verified.
+# - Test data must remain isolated from training and threshold selection.
+# - Production artifacts require integrity and signature verification.
+# - Direct writes to the runtime model registry are prohibited.
+#
+# Environment interpolation:
+#     ${VARIABLE}
+#     ${VARIABLE:default}
+#
+# Supported environments:
+#     development | test | staging | production
+# ==============================================================================
+
+
+# ==============================================================================
+# 0. CONFIGURATION CONTRACT
+# ==============================================================================
+
+config:
+
+  schema_version: "2.0"
+
+  config_version: "12.0.0"
+
+  application: "PhishGuard_AI"
+
+  component: "mlops_pipeline"
+
+  environment: "${PHISHGUARD_ENV:development}"
+
+  debug: false
+
+  # Reject malformed or incomplete configuration.
+  fail_closed: true
+
+  # Configuration loader must reject keys that are not part of the schema.
+  reject_unknown_keys: true
+
+  # Configuration must be validated before any pipeline stage executes.
+  validate_before_execution: true
+
+  # Environment interpolation is restricted to explicitly allowed variables.
+  environment_interpolation:
+    enabled: true
+    allow_unset_variables: false
+    allow_defaults: true
+    max_variable_name_length: 128
+    reject_nested_expansion: true
+
+  # Prevent accidental configuration mutation during a run.
+  immutability:
+    freeze_after_load: true
+    generate_resolved_hash: true
+    persist_resolved_config: true
+
+  compatibility:
+    minimum_pipeline_version: "12.0.0"
+    configuration_migration_required_on_major_change: true
+
+
+# ==============================================================================
+# 1. PIPELINE IDENTITY
+# ==============================================================================
+
+pipeline:
+
+  name: "phishguard_mlops_pipeline"
+
+  version: "12.0.0"
+
+  description: >
+    Enterprise machine-learning lifecycle pipeline for phishing, malicious
+    URL, email, and attachment threat-detection models.
+
+  owner: "PhishGuard_AI Engineering"
+
+  security_owner: "PhishGuard_AI Security Engineering"
+
+  ml_owner: "PhishGuard_AI ML Engineering"
+
+  registered_models:
+
+    - id: "url_classifier"
+      config: "configs/models/url_model.yaml"
+      task: "binary_classification"
+      modality: "url"
+      enabled: true
+
+    - id: "email_classifier"
+      config: "configs/models/email_model.yaml"
+      task: "binary_classification"
+      modality: "email"
+      enabled: true
+
+    - id: "attachment_classifier"
+      config: "configs/models/attachment_model.yaml"
+      task: "binary_classification"
+      modality: "attachment"
+      enabled: true
+
+  supported_stages:
+
+    - "prepare_data"
+    - "train"
+    - "evaluate"
+    - "export_onnx"
+    - "validate_artifact"
+    - "publish_artifact"
+    - "feedback_ingest"
+
+  execution:
+
+    fail_fast: true
+
+    continue_on_stage_failure: false
+
+    dry_run_supported: true
+
+    require_explicit_stage_selection: true
+
+    concurrency:
+
+      enabled: false
+
+      max_parallel_runs: 1
+
+      # Prevent multiple processes from operating on the same model.
+      model_locking:
+        enabled: true
+        lock_directory: "artifacts/locks"
+        lock_timeout_seconds: 300
+        stale_lock_timeout_seconds: 3600
+
+    run_id:
+
+      strategy: "uuid4"
+
+      include_git_commit: true
+
+      include_timestamp: true
+
+    timeouts:
+
+      pipeline_seconds: 86400
+
+      prepare_data_seconds: 14400
+
+      train_seconds: 86400
+
+      evaluate_seconds: 21600
+
+      export_seconds: 7200
+
+      artifact_validation_seconds: 3600
+
+      publication_seconds: 1800
+
+      feedback_ingest_seconds: 3600
+
+  retries:
+
+    enabled: true
+
+    max_attempts: 3
+
+    initial_backoff_seconds: 10
+
+    maximum_backoff_seconds: 300
+
+    exponential_backoff: true
+
+    jitter: true
+
+    retryable_errors:
+
+      - "network"
+      - "temporary_storage"
+      - "tracking_backend_unavailable"
+      - "registry_unavailable"
+      - "temporary_lock_contention"
+
+    non_retryable_errors:
+
+      - "configuration_error"
+      - "schema_error"
+      - "data_integrity_error"
+      - "data_leakage"
+      - "artifact_integrity_failure"
+      - "signature_verification_failure"
+      - "quality_gate_failure"
+      - "security_policy_violation"
+
+
+# ==============================================================================
+# 2. ENVIRONMENT & REPRODUCIBILITY
+# ==============================================================================
+
+reproducibility:
+
+  seed: 42
+
+  python_hash_seed: "42"
+
+  deterministic: true
+
+  deterministic_cudnn: true
+
+  benchmark_cudnn: false
+
+  warn_on_nondeterministic_operations: true
+
+  require_reproducible_training: true
+
+  capture_environment:
+
+    enabled: true
+
+    python_version: true
+
+    platform: true
+
+    operating_system: true
+
+    cpu_info: true
+
+    gpu_info: true
+
+    cuda_version: true
+
+    cudnn_version: true
+
+    dependency_versions: true
+
+    dependency_lock_hash: true
+
+    git_commit: true
+
+    git_branch: true
+
+    git_dirty_state: true
+
+    training_config_hash: true
+
+    dataset_manifest_hash: true
+
+    feature_schema_hash: true
+
+    environment_variables_allowlist_only: true
+
+  require_clean_git_tree: false
+
+  production:
+
+    require_clean_git_tree: true
+
+    require_locked_dependencies: true
+
+    require_dataset_manifest: true
+
+    require_training_config_hash: true
+
+    require_feature_schema_hash: true
+
+
+# ==============================================================================
+# 3. PATHS & STORAGE
+# ==============================================================================
+
+paths:
+
+  root_dir: "${PHISHGUARD_PROJECT_ROOT:.}"
+
+  resolution:
+
+    resolve_all_paths_against_root: true
+
+    require_existing_root: true
+
+    reject_absolute_paths: false
+
+    reject_parent_traversal: true
+
+    normalize_paths: true
+
+    resolve_symlinks: false
+
+  configs:
+
+    root_dir: "configs"
+
+    models_dir: "configs/models"
+
+    evaluation_dir: "configs/evaluation"
+
+    feedback_dir: "configs/feedback"
+
+  data:
+
+    root_dir: "data"
+
+    raw_dir: "data/raw"
+
+    processed_dir: "data/processed"
+
+    feedback_queue_dir: "data/feedback_queue"
+
+    schemas_dir: "data/schemas"
+
+    quarantine_dir: "data/quarantine"
+
+    manifests_dir: "data/manifests"
+
+  artifacts:
+
+    root_dir: "artifacts"
+
+    checkpoints_dir: "artifacts/checkpoints"
+
+    exported_dir: "artifacts/exported"
+
+    manifests_dir: "artifacts/manifests"
+
+    reports_dir: "artifacts/reports"
+
+    quarantine_dir: "artifacts/quarantine"
+
+    tracking_dir: "artifacts/tracking"
+
+    locks_dir: "artifacts/locks"
+
+    staging_dir: "artifacts/staging"
+
+    temporary_dir: "artifacts/tmp"
+
+  runtime_registry:
+
+    path: "${PHISHGUARD_MODEL_REGISTRY:config/external/model_registry}"
+
+    mode: "promotion_only"
+
+    allow_direct_write: false
+
+    require_atomic_publish: true
+
+    require_integrity_manifest: true
+
+    require_signature: true
+
+    require_versioned_artifact_directory: true
+
+    prohibit_overwrite: true
+
+  storage_limits:
+
+    minimum_free_disk_gb: 10
+
+    maximum_artifact_size_mb: 512
+
+    maximum_checkpoint_size_mb: 2048
+
+    maximum_report_size_mb: 100
+
+    fail_if_disk_below_threshold: true
+
+
+# ==============================================================================
+# 4. DATASET MANAGEMENT
+# ==============================================================================
+
+dataset:
+
+  dataset_id: "phishguard_threat_dataset"
+
+  version: "${PHISHGUARD_DATASET_VERSION:v1.0.0}"
+
+  versioning:
+
+    enabled: true
+
+    backend: "dvc"
+
+    require_tracked_data: true
+
+    require_dvc_manifest: true
+
+    require_clean_dvc_state: false
+
+    production:
+
+      require_clean_dvc_state: true
+
+      require_locked_dataset_version: true
+
+  immutability:
+
+    raw_data_read_only: true
+
+    reject_in_place_mutation: true
+
+    require_content_addressed_storage: true
+
+    reject_symlinked_raw_files: true
+
+  integrity:
+
+    require_manifest: true
+
+    require_checksum: true
+
+    checksum_algorithm: "sha256"
+
+    verify_before_processing: true
+
+    verify_before_training: true
+
+    verify_before_evaluation: true
+
+  schema:
+
+    enabled: true
+
+    directory: "data/schemas"
+
+    require_schema_version: true
+
+    schema_version: "1.0"
+
+    reject_unknown_columns: true
+
+    reject_missing_required_columns: true
+
+    reject_duplicate_columns: true
+
+    require_feature_type_validation: true
+
+    require_label_validation: true
+
+  leakage_prevention:
+
+    enabled: true
+
+    split_before_preprocessing: true
+
+    duplicate_detection: true
+
+    near_duplicate_detection: true
+
+    group_aware_split: true
+
+    group_key: "sample_group_id"
+
+    temporal_validation: true
+
+    enforce_temporal_order: true
+
+    prevent_cross_split_duplicates: true
+
+    prevent_cross_split_near_duplicates: true
+
+    prevent_entity_leakage: true
+
+    entity_keys:
+
+      - "domain"
+      - "url"
+      - "sender_domain"
+      - "attachment_hash"
+
+    maximum_train_test_overlap_ratio: 0.0
+
+    maximum_train_validation_overlap_ratio: 0.0
+
+    maximum_validation_test_overlap_ratio: 0.0
+
+  quality:
+
+    reject_empty_dataset: true
+
+    reject_nan: true
+
+    reject_inf: true
+
+    min_samples: 1000
+
+    max_missing_ratio: 0.05
+
+    max_duplicate_ratio: 0.02
+
+    max_invalid_label_ratio: 0.0
+
+    max_unknown_label_ratio: 0.01
+
+    distribution_checks:
+
+      enabled: true
+
+      max_category_cardinality: 10000
+
+      detect_distribution_shift: true
+
+  poisoning_defense:
+
+    enabled: true
+
+    detect_duplicate_injection: true
+
+    detect_label_flipping: true
+
+    detect_abnormal_class_distribution: true
+
+    detect_feature_outliers: true
+
+    require_feedback_provenance: true
+
+    require_label_confidence: true
+
+    minimum_label_confidence: 0.90
+
+  privacy:
+
+    enabled: true
+
+    redact_sensitive_values: true
+
+    pii_detection: true
+
+    pii_redaction: true
+
+    store_raw_payloads: false
+
+    hash_sensitive_identifiers: true
+
+    encryption_at_rest_required: true
+
+    retention:
+
+      enabled: true
+
+      raw_data_days: 90
+
+      processed_data_days: 365
+
+      feedback_data_days: 365
+
+      manifests_days: 1825
+
+      audit_data_days: 2555
+
+
+# ==============================================================================
+# 5. DATA PROCESSING
+# ==============================================================================
+
+data_processing:
+
+  split:
+
+    train_ratio: 0.70
+
+    validation_ratio: 0.15
+
+    test_ratio: 0.15
+
+    tolerance: 0.000001
+
+    require_ratio_sum_validation: true
+
+    stratify: true
+
+    group_aware: true
+
+    random_seed: 42
+
+    deterministic_split: true
+
+    preserve_class_distribution: true
+
+  preprocessing:
+
+    fit_on_train_only: true
+
+    transform_validation_with_train_state: true
+
+    transform_test_with_train_state: true
+
+    handle_missing_strategy: "impute_or_zero"
+
+    reject_nan_after_processing: true
+
+    reject_inf_after_processing: true
+
+    feature_order_source: "model_schema"
+
+    persist_feature_schema: true
+
+    require_feature_schema_hash: true
+
+    max_features: 2000
+
+    max_sequence_length: 512
+
+    reject_unknown_features: true
+
+    reject_feature_order_mismatch: true
+
+    numeric_range_validation: true
+
+    clipping:
+
+      enabled: true
+
+      strategy: "schema_defined"
+
+  dataloader:
+
+    batch_size: 64
+
+    num_workers: 4
+
+    pin_memory: true
+
+    persistent_workers: true
+
+    drop_last: false
+
+    prefetch_factor: 2
+
+    timeout_seconds: 120
+
+  class_balance:
+
+    enabled: true
+
+    strategy: "weighted_loss"
+
+    max_class_weight: 20.0
+
+    require_minority_class_samples: 100
+
+    prevent_test_set_rebalancing: true
+
+
+# ==============================================================================
+# 6. TRAINING
+# ==============================================================================
+
+training:
+
+  framework: "auto"
+
+  epochs: 30
+
+  optimizer:
+
+    name: "adamw"
+
+    learning_rate: 0.0001
+
+    weight_decay: 0.0001
+
+    gradient_accumulation_steps: 1
+
+  scheduler:
+
+    enabled: true
+
+    name: "cosine"
+
+    warmup_enabled: true
+
+    warmup_ratio: 0.05
+
+  early_stopping:
+
+    enabled: true
+
+    monitor: "validation_loss"
+
+    mode: "min"
+
+    patience: 5
+
+    min_delta: 0.0001
+
+  checkpointing:
+
+    enabled: true
+
+    save_best_only: true
+
+    directory: "artifacts/checkpoints"
+
+    immutable: true
+
+    require_checksum: true
+
+    require_manifest: true
+
+    prohibit_overwrite: true
+
+  gradient:
+
+    clipping:
+
+      enabled: true
+
+      max_norm: 1.0
+
+  precision:
+
+    mode: "auto"
+
+    allow_fallback_to_fp32: true
+
+    require_finite_gradients: true
+
+  reproducibility:
+
+    inherit_global_seed: true
+
+    save_rng_state: true
+
+    save_data_split_state: true
+
+    save_optimizer_state: true
+
+  security:
+
+    disable_network_access: true
+
+    prohibit_remote_code_execution: true
+
+    prohibit_untrusted_model_loading: true
+
+
+# ==============================================================================
+# 7. COMPUTE & RESOURCE GOVERNANCE
+# ==============================================================================
+
+compute:
+
+  device: "auto"
+
+  allow_tf32: true
+
+  distributed:
+
+    enabled: false
+
+    backend: "auto"
+
+    world_size: 1
+
+    require_explicit_configuration: true
+
+  resources:
+
+    max_cpu_workers: 8
+
+    max_memory_gb: 16
+
+    max_gpu_memory_fraction: 0.90
+
+    max_runtime_seconds: 86400
+
+    max_processes: 16
+
+    max_open_files: 4096
+
+    minimum_free_memory_gb: 2
+
+  isolation:
+
+    enabled: true
+
+    network_access: false
+
+    restrict_filesystem_access: true
+
+    read_only_source_tree: true
+
+    writable_directories:
+
+      - "data/processed"
+
+      - "artifacts"
+
+    prohibit_host_mounts: true
+
+    prohibit_privileged_execution: true
+
+    prohibit_root_execution: true
+
+
+# ==============================================================================
+# 8. MODEL IDENTITY & PROVENANCE
+# ==============================================================================
+
+model:
+
+  versioning:
+
+    strategy: "semantic"
+
+    require_unique_version: true
+
+    prohibit_overwrite: true
+
+    require_immutable_version: true
+
+  identity:
+
+    require_model_id: true
+
+    require_artifact_hash: true
+
+    require_feature_schema_hash: true
+
+    require_training_config_hash: true
+
+    require_dataset_version: true
+
+    require_export_config_hash: true
+
+  artifact_integrity:
+
+    hash_algorithm: "sha256"
+
+    require_checksum: true
+
+    require_manifest: true
+
+    verify_after_creation: true
+
+    verify_before_promotion: true
+
+    verify_before_registry_publish: true
+
+    signing:
+
+      enabled: true
+
+      algorithm: "ed25519"
+
+      private_key_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+      public_key_env: "PHISHGUARD_MODEL_SIGNING_PUBLIC_KEY"
+
+      require_signature_for_staging: true
+
+      require_signature_for_production: true
+
+      prohibit_unsigned_artifacts: true
+
+  provenance:
+
+    required: true
+
+    capture:
+
+      dataset_version: true
+
+      dataset_manifest_hash: true
+
+      git_commit: true
+
+      git_dirty_state: true
+
+      training_config: true
+
+      training_config_hash: true
+
+      dependency_lock: true
+
+      feature_schema: true
+
+      feature_schema_hash: true
+
+      framework_version: true
+
+      exporter_version: true
+
+      onnx_opset: true
+
+      execution_environment: true
+
+      random_seed: true
+
+      parent_model_version: true
+
+      threshold_version: true
+
+
+# ==============================================================================
+# 9. MODEL CONTRACT
+# ==============================================================================
+
+model_contract:
+
+  enabled: true
+
+  require_contract: true
+
+  schema_version: "1.0"
+
+  input:
+
+    require_fixed_schema: true
+
+    require_feature_names: true
+
+    require_feature_order: true
+
+    require_feature_types: true
+
+    reject_unknown_features: true
+
+    reject_missing_features: true
+
+    reject_nan: true
+
+    reject_inf: true
+
+    maximum_feature_count: 2000
+
+  output:
+
+    expected_task: "binary_classification"
+
+    probability_range:
+
+      minimum: 0.0
+
+      maximum: 1.0
+
+    require_finite_output: true
+
+    require_deterministic_output: true
+
+    require_probability_semantics: true
+
+  runtime:
+
+    supported_formats:
+
+      - "onnx"
+
+    supported_execution_providers:
+
+      - "CPUExecutionProvider"
+
+    prohibit_unapproved_execution_providers: true
+
+
+# ==============================================================================
+# 10. ONNX EXPORT
+# ==============================================================================
+
+export:
+
+  target_format: "onnx"
+
+  onnx:
+
+    opset_version: 17
+
+    minimum_runtime_version: "1.18.0"
+
+    input_validation:
+
+      enabled: true
+
+      require_fixed_schema: true
+
+      reject_unknown_inputs: true
+
+      reject_missing_inputs: true
+
+      verify_tensor_shapes: true
+
+      verify_tensor_types: true
+
+    output_validation:
+
+      enabled: true
+
+      require_expected_output: true
+
+      verify_probability_semantics: true
+
+      verify_finite_outputs: true
+
+  optimization:
+
+    enabled: true
+
+    optimization_level: "extended"
+
+  quantization:
+
+    enabled: true
+
+    method: "dynamic_int8"
+
+    allow_fallback: true
+
+    require_accuracy_validation: true
+
+    maximum_accuracy_drop: 0.005
+
+    maximum_roc_auc_drop: 0.005
+
+    maximum_pr_auc_drop: 0.005
+
+    prohibit_unvalidated_quantized_models: true
+
+  numerical_parity:
+
+    enabled: true
+
+    require_verification: true
+
+    rtol: 0.001
+
+    atol: 0.0001
+
+    validation_samples: 500
+
+    fail_on_mismatch: true
+
+  artifact_validation:
+
+    enabled: true
+
+    run_onnx_checker: true
+
+    verify_graph: true
+
+    verify_input_schema: true
+
+    verify_output_schema: true
+
+    verify_finite_outputs: true
+
+    verify_inference_smoke_test: true
+
+    verify_runtime_compatibility: true
+
+    verify_execution_provider: true
+
+    reject_external_model_data: true
+
+    max_model_size_mb: 512
+
+
+# ==============================================================================
+# 11. EVALUATION
+# ==============================================================================
+
+evaluation:
+
+  enabled: true
+
+  dataset:
+
+    evaluate_on_test_set: true
+
+    test_set_must_be_unseen: true
+
+    prohibit_training_samples: true
+
+    prohibit_threshold_optimization: true
+
+    prohibit_feature_selection: true
+
+  metrics:
+
+    classification:
+
+      - "precision"
+      - "recall"
+      - "f1"
+      - "f_beta"
+      - "roc_auc"
+      - "pr_auc"
+      - "false_positive_rate"
+      - "false_negative_rate"
+      - "accuracy"
+      - "specificity"
+
+    calibration:
+
+      enabled: true
+
+      metrics:
+
+        - "brier_score"
+        - "expected_calibration_error"
+
+  threshold_selection:
+
+    enabled: true
+
+    optimize_on: "validation"
+
+    production_threshold_source: "validated_threshold"
+
+    forbid_test_set_threshold_optimization: true
+
+    require_threshold_provenance: true
+
+    require_threshold_version: true
+
+  regression:
+
+    enabled: true
+
+    compare_against_production_model: true
+
+    require_same_test_protocol: true
+
+    max_metric_degradation: 0.01
+
+  reproducibility:
+
+    require_evaluation_manifest: true
+
+    require_metric_schema_version: true
+
+
+# ==============================================================================
+# 12. GLOBAL QUALITY GATES
+# ==============================================================================
+
+global_quality_gates:
+
+  enabled: true
+
+  min_precision: 0.980
+
+  min_recall: 0.950
+
+  min_roc_auc: 0.990
+
+  min_pr_auc: 0.950
+
+  max_false_positive_rate: 0.005
+
+  max_false_negative_rate: 0.050
+
+  min_f1: 0.960
+
+  max_metric_regression: 0.010
+
+  calibration:
+
+    max_brier_score: 0.100
+
+    max_expected_calibration_error: 0.050
+
+  data_quality:
+
+    max_missing_ratio: 0.05
+
+    max_duplicate_ratio: 0.02
+
+    max_cross_split_overlap: 0.0
+
+  artifact:
+
+    require_valid_onnx: true
+
+    require_integrity_manifest: true
+
+    require_signature: true
+
+    require_provenance: true
+
+  fail_on_gate_failure: true
+
+  require_all_gates_pass: true
+
+
+# ==============================================================================
+# 13. ADVERSARIAL EVALUATION
+# ==============================================================================
+
+adversarial_evaluation:
+
+  enabled: true
+
+  required_for_production: true
+
+  require_deterministic_seed: true
+
+  perturbations:
+
+    url:
+
+      enabled: true
+
+      techniques:
+
+        - "homoglyph"
+
+        - "subdomain"
+
+        - "encoding"
+
+        - "redirect"
+
+        - "case_variation"
+
+      maximum_samples_per_technique: 10000
+
+    email:
+
+      enabled: true
+
+      techniques:
+
+        - "header_variation"
+
+        - "text_obfuscation"
+
+        - "unicode_variation"
+
+        - "link_obfuscation"
+
+      maximum_samples_per_technique: 10000
+
+    attachment:
+
+      enabled: true
+
+      techniques:
+
+        - "metadata_variation"
+
+        - "benign_padding"
+
+        - "structure_variation"
+
+      maximum_samples_per_technique: 10000
+
+  gates:
+
+    max_performance_drop: 0.050
+
+    max_adversarial_vulnerability_score: 0.050
+
+    fail_on_critical_attack_regression: true
+
+    require_all_required_techniques: true
+
+    fail_if_test_incomplete: true
+
+
+# ==============================================================================
+# 14. FAIRNESS
+# ==============================================================================
+
+fairness:
+
+  enabled: true
+
+  required_for_production: true
+
+  protected_groups_source: "dataset_schema"
+
+  require_group_metrics: true
+
+  minimum_group_sample_size: 100
+
+  metrics:
+
+    - "false_positive_rate"
+
+    - "false_negative_rate"
+
+    - "recall"
+
+    - "precision"
+
+  gates:
+
+    max_fpr_difference: 0.050
+
+    max_fnr_difference: 0.050
+
+    fail_on_gate_failure: true
+
+    fail_if_group_missing: true
+
+
+# ==============================================================================
+# 15. EXPERIMENT TRACKING
+# ==============================================================================
+
+tracking:
+
+  enabled: true
+
+  backend: "mlflow"
+
+  production_backend_policy:
+
+    development:
+
+      allowed:
+
+        - "mlflow"
+
+        - "stdout"
+
+    test:
+
+      allowed:
+
+        - "mlflow"
+
+    staging:
+
+      allowed:
+
+        - "mlflow"
+
+    production:
+
+      allowed:
+
+        - "mlflow"
+
+      require_remote_backend: true
+
+      prohibit_local_sqlite: true
+
+  mlflow:
+
+    tracking_uri: "${MLFLOW_TRACKING_URI:sqlite:///artifacts/tracking/mlflow.db}"
+
+    experiment_name: "PhishGuard_AI_Threat_Detection"
+
+    artifact_location: "artifacts/tracking/mlflow_artifacts"
+
+    require_tls_in_production: true
+
+    verify_tls_certificates: true
+
+  tags:
+
+    project: "PhishGuard_AI"
+
+    component: "mlops_pipeline"
+
+    pipeline_stage: "automated_training"
+
+    config_version: "12.0.0"
+
+  logging:
+
+    log_parameters: true
+
+    log_metrics: true
+
+    log_artifacts: true
+
+    log_raw_samples: false
+
+    log_sensitive_features: false
+
+    log_model_inputs: false
+
+    log_model_outputs: false
+
+    maximum_tag_length: 256
+
+    maximum_parameter_length: 1024
+
+
+# ==============================================================================
+# 16. LOGGING
+# ==============================================================================
+
+logging:
+
+  version: 1
+
+  level: "INFO"
+
+  format: "json"
+
+  log_file: "logs/model/mlops_pipeline.log"
+
+  correlation:
+
+    enabled: true
+
+    include_run_id: true
+
+    include_stage_id: true
+
+    include_model_id: true
+
+  rotation:
+
+    max_size: "100 MB"
+
+    backup_count: 10
+
+  retention:
+
+    days: 30
+
+  security:
+
+    redact_secrets: true
+
+    redact_pii: true
+
+    redact_urls: true
+
+    redact_emails: true
+
+    prohibited_fields:
+
+      - "password"
+
+      - "token"
+
+      - "api_key"
+
+      - "authorization"
+
+      - "cookie"
+
+      - "secret"
+
+      - "private_key"
+
+      - "raw_email"
+
+      - "raw_url"
+
+      - "access_token"
+
+      - "refresh_token"
+
+      - "session_id"
+
+  limits:
+
+    maximum_message_length: 10000
+
+    maximum_exception_length: 5000
+
+
+# ==============================================================================
+# 17. PROMOTION
+# ==============================================================================
+
+promotion:
+
+  enabled: true
+
+  strategy: "gated"
+
+  lifecycle:
+
+    states:
+
+      - "created"
+
+      - "trained"
+
+      - "evaluated"
+
+      - "validated"
+
+      - "signed"
+
+      - "approved"
+
+      - "staged"
+
+      - "promoted"
+
+      - "quarantined"
+
+      - "retired"
+
+  production:
+
+    require_quality_gates: true
+
+    require_adversarial_evaluation: true
+
+    require_fairness_evaluation: true
+
+    require_onnx_validation: true
+
+    require_signature: true
+
+    require_human_approval: true
+
+    require_provenance: true
+
+    require_reproducibility_metadata: true
+
+    immutable_artifacts: true
+
+    atomic_promotion: true
+
+    prohibit_direct_registry_write: true
+
+    require_previous_model_reference: true
+
+  deployment:
+
+    strategy: "atomic"
+
+    allow_canary: true
+
+    allow_shadow: true
+
+    allow_blue_green: true
+
+    default_strategy: "canary"
+
+    canary:
+
+      initial_traffic_percent: 5
+
+      maximum_traffic_percent: 25
+
+      observation_window_minutes: 30
+
+      automatic_abort_on_regression: true
+
+      require_runtime_health_check: true
+
+    shadow:
+
+      enabled: true
+
+      compare_predictions: true
+
+      never_affect_enforcement_decision: true
+
+
+# ==============================================================================
+# 18. ROLLBACK
+# ==============================================================================
+
+rollback:
+
+  enabled: true
+
+  automatic: false
+
+  retain_versions: 3
+
+  require_previous_known_good_model: true
+
+  require_atomic_rollback: true
+
+  require_rollback_health_check: true
+
+  triggers:
+
+    critical_quality_gate_failure: true
+
+    runtime_validation_failure: true
+
+    severe_drift: true
+
+    signature_failure: true
+
+    artifact_corruption: true
+
+    catastrophic_inference_error: true
+
+  quarantine_failed_model: true
+
+  prohibit_rollback_to_unverified_artifact: true
+
+
+# ==============================================================================
+# 19. FEEDBACK LOOP
+# ==============================================================================
+
+feedback:
+
+  enabled: true
+
+  source: "analyst_validated"
+
+  queue:
+
+    path: "data/feedback_queue"
+
+    require_validation: true
+
+    reject_untrusted_labels: true
+
+    reject_duplicate_samples: true
+
+    require_sample_provenance: true
+
+    require_timestamp: true
+
+    require_analyst_identity_reference: true
+
+    replay_protection: true
+
+  labels:
+
+    allowed:
+
+      - "benign"
+
+      - "phishing"
+
+      - "malicious"
+
+      - "suspicious"
+
+      - "unknown"
+
+    require_label_source: true
+
+    require_timestamp: true
+
+    require_label_confidence: true
+
+    minimum_label_confidence: 0.90
+
+    conflict_policy: "quarantine"
+
+    unknown_label_policy: "exclude_from_supervised_training"
+
+  poisoning_protection:
+
+    enabled: true
+
+    maximum_samples_per_source_per_run: 10000
+
+    detect_label_flipping: true
+
+    detect_abnormal_distribution: true
+
+    detect_duplicate_injection: true
+
+  retraining:
+
+    enabled: true
+
+    automatic_production_promotion: false
+
+    minimum_new_samples: 500
+
+    minimum_new_positive_samples: 100
+
+    require_evaluation_before_retraining: true
+
+    require_quality_gates_after_retraining: true
+
+    require_adversarial_evaluation_after_retraining: true
+
+    require_manual_approval_for_production: true
+
+
+# ==============================================================================
+# 20. DRIFT MANAGEMENT
+# ==============================================================================
+
+drift:
+
+  enabled: true
+
+  sources:
+
+    prediction_drift: true
+
+    feature_drift: true
+
+    concept_drift: true
+
+  thresholds:
+
+    warning_psi: 0.10
+
+    critical_psi: 0.25
+
+  detection:
+
+    minimum_baseline_samples: 1000
+
+    minimum_target_samples: 100
+
+    minimum_feature_samples: 100
+
+    require_baseline_version: true
+
+    require_model_identity: true
+
+    require_feature_schema_identity: true
+
+  confirmation:
+
+    enabled: true
+
+    require_multiple_confirmations: true
+
+    confirmation_windows: 3
+
+    minimum_samples_per_window: 100
+
+    cooldown_minutes: 60
+
+  retraining:
+
+    enabled: true
+
+    trigger_on_critical_drift: true
+
+    trigger_on_persistent_warning: true
+
+    prohibit_immediate_production_promotion: true
+
+  deployment:
+
+    automatic_promotion: false
+
+    require_evaluation: true
+
+    require_quality_gates: true
+
+
+# ==============================================================================
+# 21. ARTIFACT SECURITY
+# ==============================================================================
+
+artifact_security:
+
+  enabled: true
+
+  integrity:
+
+    hash_algorithm: "sha256"
+
+    verify_after_creation: true
+
+    verify_before_evaluation: true
+
+    verify_before_promotion: true
+
+    verify_before_registry_publish: true
+
+    verify_after_registry_publish: true
+
+  permissions:
+
+    exported_models_read_only_after_validation: true
+
+    prohibit_world_writable: true
+
+    prohibit_group_writable_production_artifacts: true
+
+  quarantine:
+
+    enabled: true
+
+    directory: "artifacts/quarantine"
+
+    quarantine_failed_validation: true
+
+    quarantine_failed_signature: true
+
+    quarantine_failed_quality_gate: true
+
+    quarantine_corrupt_artifacts: true
+
+  malware_scan:
+
+    enabled: true
+
+    required_before_production: true
+
+    fail_if_scanner_unavailable: true
+
+    scan_checkpoints: true
+
+    scan_exported_models: true
+
+  external_files:
+
+    prohibit_unexpected_sidecar_files: true
+
+    prohibit_unverified_external_data: true
+
+    prohibit_executable_artifacts: true
+
+
+# ==============================================================================
+# 22. ARTIFACT RETENTION
+# ==============================================================================
+
+artifact_retention:
+
+  enabled: true
+
+  checkpoints:
+
+    retain_best: 5
+
+    retain_failed: 3
+
+    days: 90
+
+  exported_models:
+
+    retain_production_versions: 10
+
+    retain_non_production_versions: 5
+
+    days: 365
+
+  reports:
+
+    days: 365
+
+  manifests:
+
+    days: 1825
+
+  quarantine:
+
+    days: 180
+
+  deletion:
+
+    require_integrity_check: true
+
+    require_audit_event: true
+
+    prohibit_deleting_active_model: true
+
+
+# ==============================================================================
+# 23. AUDIT & CHANGE CONTROL
+# ==============================================================================
+
+audit:
+
+  enabled: true
+
+  required_events:
+
+    - "pipeline_started"
+
+    - "pipeline_completed"
+
+    - "pipeline_failed"
+
+    - "dataset_validated"
+
+    - "training_started"
+
+    - "training_completed"
+
+    - "evaluation_completed"
+
+    - "quality_gate_failed"
+
+    - "artifact_created"
+
+    - "artifact_validated"
+
+    - "artifact_signed"
+
+    - "artifact_quarantined"
+
+    - "artifact_published"
+
+    - "model_promoted"
+
+    - "model_rollback"
+
+    - "feedback_ingested"
+
+    - "retraining_triggered"
+
+    - "configuration_changed"
+
+  production:
+
+    immutable_audit_log: true
+
+    require_correlation_id: true
+
+    require_actor_identity: true
+
+    require_timestamp: true
+
+    require_model_identity: true
+
+    require_artifact_hash: true
+
+
+# ==============================================================================
+# 24. CONFIGURATION VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  validate_on_startup: true
+
+  fail_on_invalid_configuration: true
+
+  generate_config_hash: true
+
+  persist_resolved_config: true
+
+  resolved_config_path: "artifacts/reports/resolved_config.yaml"
+
+  generate_validation_report: true
+
+  validation_report_path: "artifacts/reports/config_validation.json"
+
+  checks:
+
+    schema: true
+
+    types: true
+
+    required_fields: true
+
+    enum_values: true
+
+    path_resolution: true
+
+    path_traversal: true
+
+    environment_variables: true
+
+    split_ratios: true
+
+    threshold_ranges: true
+
+    resource_limits: true
+
+    model_references: true
+
+    feature_schema: true
+
+    artifact_policy: true
+
+    signing_configuration: true
+
+    production_security_policy: true
+
+    cross_field_constraints: true
+
+  cross_field_constraints:
+
+    - "train_ratio + validation_ratio + test_ratio == 1"
+
+    - "production promotion requires quality gates"
+
+    - "production promotion requires artifact signature"
+
+    - "production promotion requires ONNX validation"
+
+    - "production promotion requires provenance"
+
+    - "production registry prohibits direct write"
+
+    - "test threshold optimization is prohibited"
+
+    - "quantized models require accuracy validation"
+
+    - "automatic production promotion is disabled"
+
+    - "production requires locked dependencies"
+
+    - "production requires immutable artifacts"
+
+
+# ==============================================================================
+# 25. EMERGENCY SAFETY CONTROLS
+# ==============================================================================
+
+emergency:
+
+  global_promotion_lock:
+
+    enabled: false
+
+    environment_variable: "PHISHGUARD_MLOPS_PROMOTION_LOCK"
+
+    fail_closed_when_set: true
+
+  training_lock:
+
+    enabled: false
+
+    environment_variable: "PHISHGUARD_MLOPS_TRAINING_LOCK"
+
+    fail_closed_when_set: true
+
+  artifact_publication_lock:
+
+    enabled: false
+
+    environment_variable: "PHISHGUARD_MLOPS_PUBLICATION_LOCK"
+
+    fail_closed_when_set: true
+
+  emergency_model_rollback:
+
+    enabled: true
+
+    require_known_good_version: true
+
+    require_audit_event: true
+
+    require_integrity_verification: true
+
+
+# ==============================================================================
+# 26. PRODUCTION POLICY
+# ==============================================================================
+
+production:
+
+  fail_closed: true
+
+  require:
+
+    validated_configuration: true
+
+    immutable_dataset_version: true
+
+    locked_dependencies: true
+
+    clean_git_tree: true
+
+    dataset_integrity_manifest: true
+
+    feature_schema_hash: true
+
+    training_config_hash: true
+
+    model_artifact_hash: true
+
+    artifact_signature: true
+
+    ONNX_validation: true
+
+    numerical_parity_validation: true
+
+    quality_gates: true
+
+    adversarial_evaluation: true
+
+    fairness_evaluation: true
+
+    calibration_evaluation: true
+
+    provenance_manifest: true
+
+    human_approval: true
+
+    audit_record: true
+
+  prohibited:
+
+    direct_registry_write: true
+
+    unsigned_model: true
+
+    mutable_model_version: true
+
+    test_set_training: true
+
+    test_set_threshold_optimization: true
+
+    unverified_quantized_model: true
+
+    untrusted_feedback_labels: true
+
+    local_mlflow_sqlite: true
+
+    automatic_production_promotion: true
+
+    raw_payload_logging: true

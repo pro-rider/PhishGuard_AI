@@ -1,0 +1,1253 @@
+# ==============================================================================
+# PhishGuard_AI - Algorithmic Fairness & Slice Parity Gates Specification
+# Version: 13.0.0
+# File Path: mlops_pipeline/configs/evaluation/fairness_gates.yaml
+#
+# Purpose
+# -------
+# Production fairness, subgroup-risk, and slice-parity evaluation contract for
+# PhishGuard_AI threat-detection models.
+#
+# This contract is intentionally separate from:
+#
+#   evaluation_gates.yaml   -> overall model quality/regression
+#   adversarial_gates.yaml  -> evasion/adversarial robustness
+#
+# This file evaluates whether model errors are disproportionately concentrated
+# in legitimate user/traffic subgroups or operationally important slices.
+#
+# Design principles
+# -----------------
+# - Fail closed for production promotion.
+# - Never infer fairness from aggregate metrics alone.
+# - Use minimum support requirements.
+# - Require positive/negative class support per slice.
+# - Prefer error-rate parity over naive demographic-parity assumptions.
+# - Use confidence intervals for disparity estimates.
+# - Correct for multiple subgroup comparisons.
+# - Evaluate intersectional slices where statistically supported.
+# - Explicitly handle unknown/missing attributes.
+# - Prevent protected/slice attributes from becoming target leakage.
+# - Freeze the fairness evaluation dataset before evaluation.
+# - Compare candidate against both absolute gates and production baseline.
+# - Require complete provenance and dataset integrity.
+#
+# IMPORTANT
+# ---------
+# Secrets, credentials, API tokens, private keys, raw payloads, and passwords
+# MUST NOT be stored in this file.
+# ==============================================================================
+
+
+schema:
+  schema_version: "1.0.0"
+  config_version: "13.0.0"
+  gate_contract_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_missing_required_fields: true
+    reject_unknown_models: true
+    reject_unknown_attributes: true
+    reject_unknown_metrics: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    evaluation_engine_version: "1.0.0"
+    inference_contract_version: "1.0.0"
+    fairness_schema_version: "1.0.0"
+
+  validation:
+    require_unique_model_ids: true
+    require_unique_attribute_names: true
+    require_unique_group_names: true
+    require_valid_threshold_ranges: true
+    require_valid_probability_ranges: true
+
+
+# ==============================================================================
+# 1. FAIRNESS EVALUATION POLICY
+# ==============================================================================
+
+fairness_policy:
+
+  policy_id: "global_fairness_gate_v13"
+
+  enabled: true
+
+  required_for:
+    - "staging"
+    - "production"
+
+  required_for_production: true
+
+  failure_mode: "fail_closed"
+
+  quarantine:
+    enabled: true
+    quarantine_on_failure: true
+    quarantine_on_evaluation_error: true
+    quarantine_directory: "artifacts/quarantine/failed_fairness_evaluations"
+    preserve_failed_report: true
+    preserve_failed_manifest: true
+
+  # --------------------------------------------------------------------------
+  # Fairness interpretation
+  # --------------------------------------------------------------------------
+
+  interpretation:
+
+    primary_goal:
+      - "minimize_disproportionate_false_positives"
+      - "minimize_disproportionate_false_negatives"
+      - "maintain_consistent_detection_quality"
+      - "identify_localized_model_failures"
+
+    security_model:
+      equal_positive_prediction_rate_not_required: true
+      equal_threat_prevalence_not_assumed: true
+      equalized_error_rates_preferred: true
+
+    rationale:
+      - >
+        Threat prevalence can legitimately differ between traffic populations.
+        Therefore demographic/selection-rate parity must not automatically
+        override security-relevant error-rate analysis.
+
+      - >
+        False-positive and false-negative disparities are treated as primary
+        fairness risks because they directly affect legitimate users and
+        protection coverage.
+
+  # --------------------------------------------------------------------------
+  # Dataset
+  # --------------------------------------------------------------------------
+
+  dataset:
+
+    evaluation_dataset: "fairness_holdout_v13"
+
+    immutable: true
+
+    require_version: true
+    require_manifest: true
+    require_checksum: true
+
+    checksum_algorithm: "sha256"
+
+    forbid_training_overlap: true
+    forbid_validation_overlap: true
+
+    test_set_independent: true
+
+    snapshot_required: true
+
+    allowed_dataset_states:
+      - "frozen"
+      - "approved"
+
+    reject_if_mutable: true
+
+  # --------------------------------------------------------------------------
+  # Reproducibility
+  # --------------------------------------------------------------------------
+
+  reproducibility:
+
+    random_seed: 42
+    deterministic: true
+
+    require_environment_capture: true
+    require_dependency_lock: true
+    require_evaluator_version: true
+
+  # --------------------------------------------------------------------------
+  # Minimum statistical support
+  # --------------------------------------------------------------------------
+
+  minimum_support:
+
+    minimum_total_samples_per_slice: 500
+
+    minimum_positive_samples_per_slice: 100
+
+    minimum_negative_samples_per_slice: 100
+
+    minimum_reference_group_samples: 1000
+
+    minimum_intersectional_samples: 1000
+
+    insufficient_support_action: "fail"
+
+    # Do not silently exclude small slices.
+    allow_silent_slice_exclusion: false
+
+  # --------------------------------------------------------------------------
+  # Unknown/missing attribute handling
+  # --------------------------------------------------------------------------
+
+  missing_attribute_policy:
+
+    enabled: true
+
+    allowed_values:
+      - "known"
+      - "unknown"
+      - "missing"
+
+    unknown_group_policy: "evaluate_separately"
+
+    missing_group_policy: "evaluate_separately"
+
+    maximum_unknown_ratio: 0.05
+
+    maximum_missing_ratio: 0.05
+
+    fail_if_unknown_ratio_exceeded: true
+    fail_if_missing_ratio_exceeded: true
+
+    never_drop_unknown_groups: true
+
+  # --------------------------------------------------------------------------
+  # Statistical estimation
+  # --------------------------------------------------------------------------
+
+  statistical_analysis:
+
+    enabled: true
+
+    confidence_level: 0.99
+
+    bootstrap:
+      enabled: true
+      method: "stratified_bootstrap"
+      iterations: 5000
+      random_seed: 42
+      replacement: true
+
+    confidence_interval_method: "percentile"
+
+    paired_comparison:
+      enabled: true
+      candidate_vs_baseline: true
+
+    multiple_comparison_correction:
+      enabled: true
+      method: "benjamini_hochberg"
+      false_discovery_rate: 0.01
+
+    minimum_effect_size_required: true
+
+  # --------------------------------------------------------------------------
+  # Statistical failure behavior
+  # --------------------------------------------------------------------------
+
+  statistical_failure_policy:
+
+    fail_on_ci_crossing_gate: true
+
+    fail_on_insufficient_support: true
+
+    fail_on_missing_ci: true
+
+    fail_on_invalid_estimate: true
+
+    fail_on_multiple_testing_error: true
+
+
+# ==============================================================================
+# 2. METRIC DEFINITIONS
+# ==============================================================================
+
+metrics:
+
+  # --------------------------------------------------------------------------
+  # Core classification metrics
+  # --------------------------------------------------------------------------
+
+  false_positive_rate:
+    formula: "FP / (FP + TN)"
+    direction: "lower_is_better"
+    zero_denominator_action: "not_applicable"
+
+  false_negative_rate:
+    formula: "FN / (FN + TP)"
+    direction: "lower_is_better"
+    zero_denominator_action: "not_applicable"
+
+  true_positive_rate:
+    formula: "TP / (TP + FN)"
+    alias: "recall"
+    direction: "higher_is_better"
+    zero_denominator_action: "not_applicable"
+
+  precision:
+    formula: "TP / (TP + FP)"
+    direction: "higher_is_better"
+    zero_denominator_action: "not_applicable"
+
+  specificity:
+    formula: "TN / (TN + FP)"
+    direction: "higher_is_better"
+    zero_denominator_action: "not_applicable"
+
+  # --------------------------------------------------------------------------
+  # Selection metrics
+  # --------------------------------------------------------------------------
+
+  positive_prediction_rate:
+    formula: "(TP + FP) / N"
+    direction: "context_dependent"
+    informational_only: true
+
+  demographic_parity_difference:
+    formula: "max(selection_rate) - min(selection_rate)"
+    direction: "lower_is_better"
+    informational_only_by_default: true
+
+  disparate_impact_ratio:
+    formula: "min(selection_rate) / max(selection_rate)"
+    direction: "higher_is_better"
+    informational_only_by_default: true
+
+  # --------------------------------------------------------------------------
+  # Error disparity
+  # --------------------------------------------------------------------------
+
+  fpr_ratio:
+    formula: "slice_FPR / reference_FPR"
+    direction: "lower_is_better_when_upper_bounded"
+
+  fnr_ratio:
+    formula: "slice_FNR / reference_FNR"
+    direction: "lower_is_better_when_upper_bounded"
+
+  tpr_difference:
+    formula: "slice_TPR - reference_TPR"
+    direction: "absolute_difference"
+
+  fpr_difference:
+    formula: "slice_FPR - reference_FPR"
+    direction: "absolute_difference"
+
+  fnr_difference:
+    formula: "slice_FNR - reference_FNR"
+    direction: "absolute_difference"
+
+  equalized_odds_difference:
+    formula: >
+      max(
+        absolute(TPR_slice - TPR_reference),
+        absolute(FPR_slice - FPR_reference)
+      )
+    direction: "lower_is_better"
+
+  # --------------------------------------------------------------------------
+  # Calibration
+  # --------------------------------------------------------------------------
+
+  calibration_error:
+    enabled: true
+    method: "expected_calibration_error"
+    direction: "lower_is_better"
+
+  brier_score:
+    enabled: true
+    direction: "lower_is_better"
+
+  # --------------------------------------------------------------------------
+  # Coverage
+  # --------------------------------------------------------------------------
+
+  prediction_coverage:
+    formula: "non_abstained_predictions / total_predictions"
+    direction: "higher_is_better"
+
+  abstention_rate:
+    formula: "abstained_predictions / total_predictions"
+    direction: "context_dependent"
+
+
+# ==============================================================================
+# 3. GLOBAL FAIRNESS GATES
+# ==============================================================================
+
+global_gates:
+
+  required: true
+
+  # Primary error-parity gates
+  max_fpr_disparity_ratio: 1.50
+  max_fnr_disparity_ratio: 1.50
+
+  max_fpr_difference: 0.050
+  max_fnr_difference: 0.050
+
+  max_equalized_odds_difference: 0.050
+
+  # Positive protection coverage
+  max_tpr_difference: 0.050
+
+  # Selection metrics are diagnostic unless explicitly enabled per attribute.
+  demographic_parity:
+    enabled: false
+
+  disparate_impact:
+    enabled: false
+
+  # Confidence-bound policy
+  confidence_bounds:
+
+    enabled: true
+
+    fpr_upper_bound:
+      compare_against: "gate"
+
+    fnr_upper_bound:
+      compare_against: "gate"
+
+    tpr_lower_bound:
+      compare_against: "gate"
+
+    disparity_upper_bound:
+      compare_against: "gate"
+
+  # Baseline comparison
+  baseline:
+
+    enabled: true
+
+    source: "production_baseline"
+
+    require_known_good_baseline: true
+
+    maximum_fpr_increase: 0.010
+
+    maximum_fnr_increase: 0.010
+
+    maximum_equalized_odds_degradation: 0.010
+
+    require_non_inferiority: true
+
+
+# ==============================================================================
+# 4. MODEL-SPECIFIC FAIRNESS CONTRACTS
+# ==============================================================================
+
+models:
+
+  # ============================================================================
+  # 4.1 EMAIL CLASSIFIER
+  # ============================================================================
+
+  email_classifier:
+
+    enabled: true
+
+    model_id: "email_classifier"
+
+    operating_threshold_source: "validated_threshold"
+
+    require_model_threshold_match: true
+
+    attributes:
+
+      # ------------------------------------------------------------------------
+      # Language
+      # ------------------------------------------------------------------------
+
+      primary_language:
+
+        enabled: true
+
+        category: "legitimate_user_attribute"
+
+        attribute_type: "categorical"
+
+        reference_group: "en_US"
+
+        evaluated_groups:
+          - "es_ES"
+          - "fr_FR"
+          - "de_DE"
+          - "ja_JP"
+          - "zh_CN"
+          - "ar_SA"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.50
+          max_fnr_ratio: 1.30
+
+          max_fpr_difference: 0.030
+          max_fnr_difference: 0.030
+
+          max_equalized_odds_difference: 0.030
+
+          max_tpr_difference: 0.030
+
+          confidence_level: 0.99
+
+        disparate_impact:
+
+          enabled: false
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.010
+          max_fnr_increase: 0.010
+
+      # ------------------------------------------------------------------------
+      # Organizational role
+      # ------------------------------------------------------------------------
+
+      department_role:
+
+        enabled: true
+
+        category: "operational_risk_slice"
+
+        attribute_type: "categorical"
+
+        reference_group: "general_staff"
+
+        evaluated_groups:
+          - "executive_c_suite"
+          - "finance_accounting"
+          - "human_resources"
+          - "legal_compliance"
+          - "engineering_it"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.25
+          max_fnr_ratio: 1.25
+
+          max_fpr_difference: 0.020
+          max_fnr_difference: 0.025
+
+          max_equalized_odds_difference: 0.025
+
+          max_tpr_difference: 0.025
+
+        disparate_impact:
+
+          enabled: false
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.005
+          max_fnr_increase: 0.010
+
+      # ------------------------------------------------------------------------
+      # Sender organization
+      # ------------------------------------------------------------------------
+
+      sender_organization_type:
+
+        enabled: true
+
+        category: "traffic_risk_slice"
+
+        attribute_type: "categorical"
+
+        reference_group: "enterprise_partner"
+
+        evaluated_groups:
+          - "smb_vendor"
+          - "educational_institution"
+          - "non_profit"
+          - "freemail_provider"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.50
+          max_fnr_ratio: 1.35
+
+          max_fpr_difference: 0.040
+          max_fnr_difference: 0.040
+
+          max_equalized_odds_difference: 0.040
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.010
+          max_fnr_increase: 0.010
+
+
+  # ============================================================================
+  # 4.2 URL CLASSIFIER
+  # ============================================================================
+
+  url_classifier:
+
+    enabled: true
+
+    model_id: "url_classifier"
+
+    operating_threshold_source: "validated_threshold"
+
+    require_model_threshold_match: true
+
+    attributes:
+
+      # ------------------------------------------------------------------------
+      # TLD category
+      # ------------------------------------------------------------------------
+
+      tld_category:
+
+        enabled: true
+
+        category: "traffic_risk_slice"
+
+        attribute_type: "categorical"
+
+        reference_group: "legacy_gtld"
+
+        evaluated_groups:
+          - "cc_tld"
+          - "new_gtld"
+          - "emerging_tld"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.50
+          max_fnr_ratio: 1.35
+
+          max_fpr_difference: 0.040
+          max_fnr_difference: 0.040
+
+          max_equalized_odds_difference: 0.040
+
+          max_tpr_difference: 0.040
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.010
+          max_fnr_increase: 0.010
+
+      # ------------------------------------------------------------------------
+      # Hosting provider
+      # ------------------------------------------------------------------------
+
+      hosting_provider_tier:
+
+        enabled: true
+
+        category: "infrastructure_risk_slice"
+
+        attribute_type: "categorical"
+
+        reference_group: "tier_1_cloud"
+
+        evaluated_groups:
+          - "regional_hosting_provider"
+          - "shared_cpanel_hosting"
+          - "content_delivery_network"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.50
+          max_fnr_ratio: 1.35
+
+          max_fpr_difference: 0.040
+          max_fnr_difference: 0.040
+
+          max_equalized_odds_difference: 0.040
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.010
+          max_fnr_increase: 0.010
+
+
+  # ============================================================================
+  # 4.3 ATTACHMENT CLASSIFIER
+  # ============================================================================
+
+  attachment_classifier:
+
+    enabled: true
+
+    model_id: "attachment_classifier"
+
+    operating_threshold_source: "validated_threshold"
+
+    require_model_threshold_match: true
+
+    attributes:
+
+      # ------------------------------------------------------------------------
+      # File format family
+      # ------------------------------------------------------------------------
+
+      file_format_family:
+
+        enabled: true
+
+        category: "traffic_risk_slice"
+
+        attribute_type: "categorical"
+
+        reference_group: "standard_pdf"
+
+        evaluated_groups:
+          - "office_open_xml"
+          - "legacy_office_doc"
+          - "compressed_archive"
+          - "text_script"
+          - "unknown"
+          - "missing"
+
+        minimum_samples:
+          total: 500
+          positive: 100
+          negative: 100
+
+        gates:
+
+          max_fpr_ratio: 1.50
+          max_fnr_ratio: 1.30
+
+          max_fpr_difference: 0.040
+          max_fnr_difference: 0.040
+
+          max_equalized_odds_difference: 0.040
+
+          max_tpr_difference: 0.040
+
+        baseline:
+
+          enabled: true
+          max_fpr_increase: 0.010
+          max_fnr_increase: 0.010
+
+
+# ==============================================================================
+# 5. INTERSECTIONAL ANALYSIS
+# ==============================================================================
+
+intersectional_analysis:
+
+  enabled: true
+
+  required_for_production: true
+
+  maximum_attributes_per_intersection: 2
+
+  examples:
+
+    - name: "email_language_x_department"
+      model_id: "email_classifier"
+      attributes:
+        - "primary_language"
+        - "department_role"
+
+    - name: "url_tld_x_hosting"
+      model_id: "url_classifier"
+      attributes:
+        - "tld_category"
+        - "hosting_provider_tier"
+
+  minimum_support:
+
+    total_samples: 1000
+    positive_samples: 200
+    negative_samples: 200
+
+  gates:
+
+    max_fpr_ratio: 1.75
+    max_fnr_ratio: 1.50
+
+    max_fpr_difference: 0.060
+    max_fnr_difference: 0.060
+
+    max_equalized_odds_difference: 0.060
+
+  multiple_testing:
+
+    enabled: true
+    correction: "benjamini_hochberg"
+    false_discovery_rate: 0.01
+
+  insufficient_support_action: "fail"
+
+
+# ==============================================================================
+# 6. LOW-PREVALENCE AND ZERO-DENOMINATOR PROTECTION
+# ==============================================================================
+
+edge_case_policy:
+
+  zero_true_positives:
+
+    action: "fail_if_expected_positive_support"
+
+  zero_true_negatives:
+
+    action: "fail_if_expected_negative_support"
+
+  zero_denominator:
+
+    metric_action: "not_applicable"
+
+    gate_action: "fail_when_required"
+
+  extremely_low_prevalence:
+
+    enabled: true
+
+    minimum_positive_rate: 0.01
+
+    action: "require_manual_review"
+
+  highly_imbalanced_slice:
+
+    enabled: true
+
+    maximum_class_ratio: 100.0
+
+    action: "flag_and_require_ci"
+
+  all_predictions_same_class:
+
+    action: "fail"
+
+
+# ==============================================================================
+# 7. DATA QUALITY AND LEAKAGE CONTROLS
+# ==============================================================================
+
+data_quality:
+
+  enabled: true
+
+  require_ground_truth: true
+
+  reject_missing_labels: true
+
+  reject_invalid_labels: true
+
+  allowed_labels:
+    binary:
+      - 0
+      - 1
+
+  attribute_integrity:
+
+    require_attribute_schema: true
+
+    reject_unknown_attribute_values: false
+
+    preserve_unknown_as_group: true
+
+    reject_normalized_alias_collisions: true
+
+  leakage_prevention:
+
+    enabled: true
+
+    protected_attributes_must_not_be_target_derived: true
+
+    prohibit_post_prediction_attributes: true
+
+    prohibit_analyst_decision_attributes: true
+
+    prohibit_production_outcome_leakage: true
+
+    prohibit_future_information: true
+
+    require_feature_lineage_validation: true
+
+
+# ==============================================================================
+# 8. THRESHOLD AND PREDICTION CONSISTENCY
+# ==============================================================================
+
+prediction_contract:
+
+  enabled: true
+
+  threshold_source:
+    type: "validated_threshold"
+
+  prohibit_threshold_reoptimization: true
+
+  threshold_dataset:
+    allowed:
+      - "validation"
+
+    forbidden:
+      - "test"
+      - "fairness_holdout"
+      - "production"
+
+  require_probability_range:
+    enabled: true
+    minimum: 0.0
+    maximum: 1.0
+
+  reject_nan_predictions: true
+  reject_inf_predictions: true
+
+  require_candidate_artifact_match: true
+
+  require_model_hash_match: true
+
+
+# ==============================================================================
+# 9. BASELINE COMPARISON
+# ==============================================================================
+
+baseline_comparison:
+
+  enabled: true
+
+  source: "production_baseline"
+
+  require_baseline: true
+
+  baseline_must_be_known_good: true
+
+  comparison:
+
+    paired_samples_required: true
+
+    maximum_global_fpr_increase: 0.005
+
+    maximum_global_fnr_increase: 0.005
+
+    maximum_slice_fpr_increase: 0.010
+
+    maximum_slice_fnr_increase: 0.010
+
+    maximum_equalized_odds_degradation: 0.010
+
+  non_inferiority:
+
+    enabled: true
+
+    confidence_level: 0.99
+
+    margin: 0.010
+
+    fail_if_non_inferiority_not_demonstrated: true
+
+
+# ==============================================================================
+# 10. FAIRNESS SEVERITY CLASSIFICATION
+# ==============================================================================
+
+severity:
+
+  critical:
+
+    conditions:
+      - "minimum_support_failure"
+      - "required_slice_missing"
+      - "fpr_disparity_critical"
+      - "fnr_disparity_critical"
+      - "intersectional_gate_failure"
+      - "dataset_integrity_failure"
+      - "provenance_failure"
+      - "prediction_contract_failure"
+
+    action: "block_promotion"
+
+  high:
+
+    conditions:
+      - "confidence_bound_gate_failure"
+      - "baseline_regression"
+      - "equalized_odds_failure"
+
+    action: "block_promotion"
+
+  medium:
+
+    conditions:
+      - "high_unknown_attribute_rate"
+      - "high_missing_attribute_rate"
+      - "low_prevalence"
+      - "large_uncertainty"
+
+    action: "manual_review"
+
+  low:
+
+    conditions:
+      - "informational_selection_rate_difference"
+
+    action: "record_only"
+
+
+# ==============================================================================
+# 11. MANUAL REVIEW POLICY
+# ==============================================================================
+
+manual_review:
+
+  enabled: true
+
+  allowed_only_for:
+
+    - "medium_severity"
+
+  forbidden_for:
+
+    - "critical"
+    - "high"
+
+  required_evidence:
+
+    - "slice_metrics"
+    - "confidence_intervals"
+    - "sample_counts"
+    - "baseline_comparison"
+    - "dataset_manifest"
+    - "model_hash"
+    - "evaluator_version"
+
+  approval_required: true
+
+  production_promotion_without_approval: false
+
+
+# ==============================================================================
+# 12. REPORTING
+# ==============================================================================
+
+reporting:
+
+  enabled: true
+
+  generate_json_summary: true
+
+  generate_markdown_report: true
+
+  generate_slice_matrix: true
+
+  generate_confidence_interval_report: true
+
+  generate_intersectional_report: true
+
+  generate_baseline_comparison: true
+
+  output_directory: "artifacts/reports/fairness_gates"
+
+  report_filenames:
+
+    summary_json: "fairness_summary.json"
+
+    detailed_markdown: "fairness_report.md"
+
+    gate_status: "fairness_gate_status.json"
+
+    slice_metrics: "fairness_slice_metrics.json"
+
+    intersectional_metrics: "fairness_intersectional_metrics.json"
+
+    confidence_intervals: "fairness_confidence_intervals.json"
+
+    baseline_comparison: "fairness_baseline_comparison.json"
+
+  required_provenance_keys:
+
+    - "model_id"
+    - "artifact_version"
+    - "model_artifact_sha256"
+    - "dataset_id"
+    - "dataset_version"
+    - "dataset_manifest_sha256"
+    - "git_commit"
+    - "evaluation_timestamp"
+    - "evaluation_engine_version"
+    - "fairness_contract_version"
+    - "operating_threshold"
+    - "fairness_gate_passed"
+    - "failed_subgroups"
+    - "failed_metrics"
+    - "multiple_testing_method"
+    - "confidence_level"
+
+
+# ==============================================================================
+# 13. AUDIT TRAIL
+# ==============================================================================
+
+audit:
+
+  enabled: true
+
+  immutable_results: true
+
+  append_only: true
+
+  require_evaluation_id: true
+
+  evaluation_id_strategy: "uuid"
+
+  record:
+
+    - "evaluation_id"
+    - "model_id"
+    - "model_version"
+    - "artifact_sha256"
+    - "dataset_version"
+    - "dataset_sha256"
+    - "git_commit"
+    - "config_hash"
+    - "evaluator_version"
+    - "timestamp"
+    - "threshold"
+    - "slice_counts"
+    - "metric_values"
+    - "confidence_intervals"
+    - "gate_results"
+    - "baseline_results"
+    - "final_decision"
+
+  retention:
+
+    enabled: true
+
+    minimum_days: 365
+
+
+# ==============================================================================
+# 14. EXECUTION & ORCHESTRATION
+# ==============================================================================
+
+execution:
+
+  timeout_seconds: 1800
+
+  parallel_model_evaluation: true
+
+  parallel_attribute_evaluation: true
+
+  parallel_intersectional_evaluation: true
+
+  max_workers: 4
+
+  deterministic_execution: true
+
+  fail_fast: false
+  # Evaluate all slices even when one fails so the report contains the complete
+  # failure picture.
+
+  continue_after_gate_failure: true
+
+  final_decision_requires_all_required_gates: true
+
+  cli_exit_codes:
+
+    success_all_passed: 0
+
+    gate_failure: 1
+
+    config_validation_error: 2
+
+    dataset_integrity_error: 3
+
+    insufficient_support_error: 4
+
+    provenance_error: 5
+
+    system_error: 6
+
+
+# ==============================================================================
+# 15. FINAL PROMOTION CONTRACT
+# ==============================================================================
+
+promotion:
+
+  production:
+
+    required: true
+
+    all_enabled_models_must_pass: true
+
+    all_required_attributes_must_pass: true
+
+    intersectional_analysis_must_pass: true
+
+    baseline_comparison_must_pass: true
+
+    confidence_intervals_must_pass: true
+
+    data_integrity_must_pass: true
+
+    provenance_must_pass: true
+
+    manual_review_requirements_must_be_satisfied: true
+
+    allow_partial_pass: false
+
+    allow_unknown_gate_state: false
+
+    allow_not_evaluated_state: false
+
+    allow_missing_slice_state: false
+
+    allow_override: false
+
+  final_states:
+
+    PASS:
+      promotion_allowed: true
+
+    WARN:
+      promotion_allowed: false
+
+    NOT_APPLICABLE:
+      promotion_allowed: false
+
+    FAIL:
+      promotion_allowed: false
+
+    ERROR:
+      promotion_allowed: false

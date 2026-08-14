@@ -1,0 +1,1966 @@
+# ==============================================================================
+# PhishGuard_AI - Global Evaluation Gates Specification
+# Version: 13.0.0
+# File:
+#   mlops_pipeline/configs/evaluation/evaluation_gates.yaml
+#
+# Purpose
+# -------
+# Centralized production evaluation contract for:
+#
+#   URL classifier
+#   Email classifier
+#   Attachment classifier
+#
+# Evaluation lifecycle:
+#
+#   candidate artifact
+#       |
+#       v
+#   schema / provenance validation
+#       |
+#       v
+#   validation evaluation
+#       |
+#       v
+#   frozen test evaluation
+#       |
+#       v
+#   OOD evaluation
+#       |
+#       v
+#   calibration evaluation
+#       |
+#       v
+#   slice evaluation
+#       |
+#       v
+#   production regression comparison
+#       |
+#       v
+#   statistical uncertainty evaluation
+#       |
+#       v
+#   final gate decision
+#
+# Design principles
+# -----------------
+# - fail closed
+# - zero-trust evaluation inputs
+# - frozen test sets
+# - immutable OOD holdouts
+# - threshold integrity
+# - confidence intervals
+# - minimum statistical support
+# - non-inferiority regression testing
+# - slice-aware evaluation
+# - calibration validation
+# - OOD / abstention evaluation
+# - reproducible evaluation
+# - complete provenance
+# - machine-readable gate results
+#
+# IMPORTANT
+# ---------
+# No secrets, credentials, API keys, private keys, tokens, passwords, or raw
+# payloads may be stored in this configuration.
+# ==============================================================================
+
+
+# ==============================================================================
+# 0. SCHEMA & COMPATIBILITY CONTRACT
+# ==============================================================================
+
+schema:
+
+  schema_version: "1.0.0"
+  config_version: "13.0.0"
+  gate_contract_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_unknown_models: true
+    reject_unknown_metrics: true
+    reject_unknown_slices: false
+    reject_missing_required_fields: true
+    reject_duplicate_metric_definitions: true
+
+  compatibility:
+
+    minimum_pipeline_version: "13.0.0"
+
+    evaluation_engine:
+      minimum_version: "1.0.0"
+
+    supported_task_types:
+      - "binary_classification"
+
+    supported_positive_labels:
+      - 1
+
+
+# ==============================================================================
+# 1. GLOBAL EVALUATION POLICY
+# ==============================================================================
+
+evaluation_policy:
+
+  policy_id: "global_production_gate_v13"
+
+  enabled: true
+
+  environment_enforcement:
+
+    development:
+      enabled: false
+      strict: false
+
+    test:
+      enabled: true
+      strict: true
+
+    staging:
+      enabled: true
+      strict: true
+
+    production:
+      enabled: true
+      strict: true
+
+  # --------------------------------------------------------------------------
+  # Failure behavior
+  # --------------------------------------------------------------------------
+
+  failure_mode: "fail_closed"
+
+  fail_on:
+
+    required_metric_missing: true
+    metric_computation_error: true
+    dataset_integrity_failure: true
+    provenance_failure: true
+    threshold_integrity_failure: true
+    confidence_interval_failure: true
+    slice_support_failure: true
+    calibration_failure: true
+    regression_failure: true
+    statistical_test_failure: true
+
+  quarantine:
+
+    enabled: true
+
+    on_gate_failure: true
+    on_evaluation_error: true
+    on_provenance_failure: true
+    on_integrity_failure: true
+
+    directory: "artifacts/quarantine/failed_evaluations"
+
+    require_atomic_quarantine: true
+
+
+# ==============================================================================
+# 2. REPRODUCIBILITY
+# ==============================================================================
+
+reproducibility:
+
+  enabled: true
+
+  random_seed: 42
+
+  deterministic_evaluation: true
+
+  capture:
+
+    evaluator_version: true
+    python_version: true
+    framework_versions: true
+    dependency_lock_hash: true
+
+    operating_system: true
+    hardware_summary: true
+
+    git_commit: true
+    git_dirty_state: true
+
+    evaluation_config_hash: true
+    resolved_config_hash: true
+
+    dataset_manifest_hash: true
+    model_manifest_hash: true
+    feature_schema_hash: true
+
+  require_reproducible_run_id: true
+
+
+# ==============================================================================
+# 3. DATASET TRUST & INTEGRITY
+# ==============================================================================
+
+datasets:
+
+  # --------------------------------------------------------------------------
+  # General dataset requirements
+  # --------------------------------------------------------------------------
+
+  global:
+
+    require_manifest: true
+
+    require_sha256: true
+
+    checksum_algorithm: "sha256"
+
+    require_dataset_version: true
+
+    require_schema_version: true
+
+    require_feature_schema_hash: true
+
+    require_label_schema_hash: true
+
+    reject_duplicate_sample_ids: true
+
+    reject_missing_labels: true
+
+    reject_nan_predictions: true
+
+    reject_inf_predictions: true
+
+    prohibit_training_data_overlap: true
+
+    prohibit_validation_test_overlap: true
+
+    prohibit_test_ood_overlap: true
+
+    prohibit_feedback_queue_overlap: true
+
+  # --------------------------------------------------------------------------
+  # Validation set
+  # --------------------------------------------------------------------------
+
+  validation:
+
+    required: true
+
+    mutable: false
+
+    purpose:
+      - "threshold_selection"
+      - "calibration"
+      - "early_evaluation"
+
+    allow_model_selection: true
+
+  # --------------------------------------------------------------------------
+  # Test set
+  # --------------------------------------------------------------------------
+
+  test:
+
+    required: true
+
+    frozen: true
+
+    immutable: true
+
+    allow_model_selection: false
+
+    allow_threshold_selection: false
+
+    allow_calibration_fit: false
+
+    allow_hyperparameter_tuning: false
+
+    allow_feature_selection: false
+
+    require_unseen_samples: true
+
+  # --------------------------------------------------------------------------
+  # OOD set
+  # --------------------------------------------------------------------------
+
+  out_of_distribution:
+
+    required_for_production: true
+
+    frozen: true
+
+    immutable: true
+
+    allow_model_selection: false
+
+    allow_threshold_selection: false
+
+    require_distribution_shift_documentation: true
+
+    require_dataset_origin_documentation: true
+
+    require_temporal_or_source_separation: true
+
+
+# ==============================================================================
+# 4. DATASET MINIMUM SUPPORT REQUIREMENTS
+# ==============================================================================
+
+minimum_support:
+
+  global:
+
+    total_samples: 10000
+
+    positive_samples: 1000
+
+    negative_samples: 5000
+
+  test:
+
+    total_samples: 5000
+
+    positive_samples: 500
+
+    negative_samples: 2500
+
+  ood:
+
+    total_samples: 3000
+
+    positive_samples: 300
+
+    negative_samples: 1500
+
+  bootstrap:
+
+    minimum_samples: 5000
+
+    minimum_positive_samples: 500
+
+    minimum_negative_samples: 2500
+
+  slices:
+
+    minimum_total_samples: 200
+
+    minimum_positive_samples: 50
+
+    minimum_negative_samples: 100
+
+    insufficient_support_action: "fail"
+
+
+# ==============================================================================
+# 5. METRIC COMPUTATION CONTRACT
+# ==============================================================================
+
+metrics:
+
+  positive_class:
+
+    label: 1
+
+  binary_classification:
+
+    averaging: "binary"
+
+    zero_division: "fail"
+
+  thresholded_metrics:
+
+    require_operating_threshold: true
+
+    threshold_source:
+
+      allowed:
+        - "validated_threshold_artifact"
+        - "model_manifest"
+
+      forbidden:
+        - "test_optimized"
+        - "production_optimized"
+
+    threshold_precision: 6
+
+  ranking_metrics:
+
+    roc_auc:
+      higher_is_better: true
+
+    pr_auc:
+      implementation: "average_precision"
+      higher_is_better: true
+
+  classification_metrics:
+
+    precision:
+      higher_is_better: true
+
+    recall:
+      higher_is_better: true
+
+    f1:
+      higher_is_better: true
+
+    false_positive_rate:
+      higher_is_better: false
+
+    false_negative_rate:
+      higher_is_better: false
+
+    specificity:
+      higher_is_better: true
+
+  calibration_metrics:
+
+    brier_score:
+      lower_is_better: true
+
+    expected_calibration_error:
+      lower_is_better: true
+
+    maximum_calibration_error:
+      lower_is_better: true
+
+    log_loss:
+      lower_is_better: true
+
+  operational_metrics:
+
+    coverage:
+      higher_is_better: true
+
+    abstention_rate:
+      lower_is_better: true
+
+    selective_risk:
+      lower_is_better: true
+
+
+# ==============================================================================
+# 6. CONFIDENCE INTERVAL POLICY
+# ==============================================================================
+
+confidence_intervals:
+
+  enabled: true
+
+  method: "bootstrap"
+
+  confidence_level: 0.99
+
+  interval_type: "percentile"
+
+  bootstrap_samples: 5000
+
+  random_seed: 42
+
+  resampling_unit: "sample_id"
+
+  stratified_resampling: true
+
+  paired_resampling_for_comparison: true
+
+  replacement: true
+
+  minimum_effective_bootstrap_samples: 4500
+
+  metric_rules:
+
+    higher_is_better:
+
+      precision:
+        gate_on: "lower_bound"
+
+      recall:
+        gate_on: "lower_bound"
+
+      f1:
+        gate_on: "lower_bound"
+
+      roc_auc:
+        gate_on: "lower_bound"
+
+      pr_auc:
+        gate_on: "lower_bound"
+
+      specificity:
+        gate_on: "lower_bound"
+
+    lower_is_better:
+
+      false_positive_rate:
+        gate_on: "upper_bound"
+
+      false_negative_rate:
+        gate_on: "upper_bound"
+
+      brier_score:
+        gate_on: "upper_bound"
+
+      expected_calibration_error:
+        gate_on: "upper_bound"
+
+      maximum_calibration_error:
+        gate_on: "upper_bound"
+
+      log_loss:
+        gate_on: "upper_bound"
+
+      abstention_rate:
+        gate_on: "upper_bound"
+
+      selective_risk:
+        gate_on: "upper_bound"
+
+
+# ==============================================================================
+# 7. STATISTICAL COMPARISON POLICY
+# ==============================================================================
+
+statistical_comparison:
+
+  enabled: true
+
+  comparison_target:
+
+    production_baseline_required: true
+
+    baseline_source:
+      allowed:
+        - "production_registry"
+        - "known_good_artifact"
+
+    baseline_must_be_immutable: true
+
+    candidate_and_baseline_must_share_test_set: true
+
+  # --------------------------------------------------------------------------
+  # Paired bootstrap
+  # --------------------------------------------------------------------------
+
+  paired_bootstrap:
+
+    enabled: true
+
+    samples: 5000
+
+    confidence_level: 0.99
+
+    interval_type: "percentile"
+
+    resampling_unit: "sample_id"
+
+    stratified_by_label: true
+
+    compare_metric_difference: true
+
+    difference_definition:
+      candidate_minus_baseline: true
+
+  # --------------------------------------------------------------------------
+  # McNemar
+  # --------------------------------------------------------------------------
+
+  mcnemar:
+
+    enabled: true
+
+    required_for_thresholded_classifier_comparison: true
+
+    exact: true
+
+    continuity_correction: false
+
+    alpha: 0.01
+
+    require_paired_predictions: true
+
+    minimum_discordant_pairs: 25
+
+  # --------------------------------------------------------------------------
+  # Statistical significance
+  # --------------------------------------------------------------------------
+
+  significance:
+
+    enabled: true
+
+    alpha: 0.01
+
+    multiple_comparison_correction:
+      enabled: true
+      method: "holm"
+
+  # --------------------------------------------------------------------------
+  # IMPORTANT:
+  # Statistical significance alone cannot determine promotion.
+  # Practical regression/non-inferiority margins are evaluated separately.
+  # --------------------------------------------------------------------------
+
+  practical_significance:
+
+    required: true
+
+    promotion_requires:
+
+      absolute_gate_pass: true
+
+      confidence_interval_gate_pass: true
+
+      practical_regression_gate_pass: true
+
+
+# ==============================================================================
+# 8. REGRESSION / NON-INFERIORITY POLICY
+# ==============================================================================
+
+regression_policy:
+
+  enabled: true
+
+  default:
+
+    allow_regression: false
+
+    require_non_inferiority: true
+
+    confidence_level: 0.99
+
+  interpretation:
+
+    higher_is_better:
+      candidate_minus_baseline_must_be_greater_than_or_equal_to:
+        - "negative_margin"
+
+    lower_is_better:
+      candidate_minus_baseline_must_be_less_than_or_equal_to:
+        - "positive_margin"
+
+  # Statistical significance must NOT be interpreted as "candidate must have
+  # p <= 0.01 to be better". A candidate can be practically equivalent and
+  # still be eligible for promotion if it satisfies the non-inferiority margin.
+
+
+# ==============================================================================
+# 9. MODEL EVALUATION GATES
+# ==============================================================================
+
+models:
+
+  # ============================================================================
+  # EMAIL CLASSIFIER
+  # ============================================================================
+
+  email_classifier:
+
+    enabled: true
+
+    model_id: "email_classifier"
+
+    task_type: "binary_classification"
+
+    positive_label: 1
+
+    primary_metric: "pr_auc"
+
+    threshold:
+
+      expected_value: 0.900000
+
+      tolerance: 0.000001
+
+      source: "validated_threshold_artifact"
+
+      require_manifest_match: true
+
+      forbid_test_set_optimization: true
+
+    evaluation_sets:
+
+      validation:
+        required: true
+
+      test:
+        required: true
+
+      out_of_distribution:
+        required: true
+
+    global_thresholds:
+
+      precision:
+        minimum: 0.9950
+        gate_on: "lower_confidence_bound"
+
+      recall:
+        minimum: 0.9400
+        gate_on: "lower_confidence_bound"
+
+      f1:
+        minimum: 0.9667
+        gate_on: "lower_confidence_bound"
+
+      roc_auc:
+        minimum: 0.9920
+        gate_on: "lower_confidence_bound"
+
+      pr_auc:
+        minimum: 0.9700
+        gate_on: "lower_confidence_bound"
+
+      false_positive_rate:
+        maximum: 0.0010
+        gate_on: "upper_confidence_bound"
+
+      false_negative_rate:
+        maximum: 0.0600
+        gate_on: "upper_confidence_bound"
+
+    minimum_support:
+
+      test:
+        total: 5000
+        positive: 500
+        negative: 2500
+
+    calibration:
+
+      enabled: true
+
+      fit_dataset: "validation"
+
+      evaluate_dataset: "test"
+
+      forbidden_fit_datasets:
+        - "test"
+        - "ood"
+        - "production"
+
+      methods:
+
+        primary:
+          name: "temperature_scaling"
+
+        comparison:
+          enabled: true
+          candidates:
+            - "temperature_scaling"
+            - "sigmoid"
+
+      metrics:
+
+        expected_calibration_error:
+          maximum: 0.0500
+          bins: 15
+          binning: "uniform"
+          gate_on: "upper_confidence_bound"
+
+        brier_score:
+          maximum: 0.1000
+          gate_on: "upper_confidence_bound"
+
+        log_loss:
+          maximum: 0.3000
+          gate_on: "upper_confidence_bound"
+
+      require_reliability_curve: true
+
+    regression:
+
+      enabled: true
+
+      baseline_required: true
+
+      limits:
+
+        pr_auc:
+          maximum_degradation: 0.0000
+          confidence_bound: "lower"
+
+        recall:
+          maximum_degradation: 0.0020
+          confidence_bound: "lower"
+
+        fpr:
+          maximum_increase: 0.0001
+          confidence_bound: "upper"
+
+        precision:
+          maximum_degradation: 0.0010
+          confidence_bound: "lower"
+
+      mcnemar_required: true
+
+    critical_slices:
+
+      vip_executives:
+
+        required: true
+
+        minimum_samples: 200
+        minimum_positive_samples: 50
+        minimum_negative_samples: 100
+
+        precision:
+          minimum: 0.9990
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9500
+          gate_on: "lower_confidence_bound"
+
+        false_positive_rate:
+          maximum: 0.0002
+          gate_on: "upper_confidence_bound"
+
+      display_name_spoofing:
+
+        required: true
+
+        minimum_samples: 200
+
+        precision:
+          minimum: 0.9920
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9600
+          gate_on: "lower_confidence_bound"
+
+      bec_financial_requests:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9950
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9500
+          gate_on: "lower_confidence_bound"
+
+      zero_day_domains:
+
+        required: true
+
+        minimum_samples: 200
+
+        precision:
+          minimum: 0.9850
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9000
+          gate_on: "lower_confidence_bound"
+
+
+  # ============================================================================
+  # URL CLASSIFIER
+  # ============================================================================
+
+  url_classifier:
+
+    enabled: true
+
+    model_id: "url_classifier"
+
+    task_type: "binary_classification"
+
+    positive_label: 1
+
+    primary_metric: "pr_auc"
+
+    threshold:
+
+      expected_value: 0.850000
+
+      tolerance: 0.000001
+
+      source: "validated_threshold_artifact"
+
+      require_manifest_match: true
+
+      forbid_test_set_optimization: true
+
+    evaluation_sets:
+
+      validation:
+        required: true
+
+      test:
+        required: true
+
+      out_of_distribution:
+        required: true
+
+    global_thresholds:
+
+      precision:
+        minimum: 0.9900
+        gate_on: "lower_confidence_bound"
+
+      recall:
+        minimum: 0.9600
+        gate_on: "lower_confidence_bound"
+
+      f1:
+        minimum: 0.9747
+        gate_on: "lower_confidence_bound"
+
+      roc_auc:
+        minimum: 0.9950
+        gate_on: "lower_confidence_bound"
+
+      pr_auc:
+        minimum: 0.9800
+        gate_on: "lower_confidence_bound"
+
+      false_positive_rate:
+        maximum: 0.0020
+        gate_on: "upper_confidence_bound"
+
+      false_negative_rate:
+        maximum: 0.0400
+        gate_on: "upper_confidence_bound"
+
+    minimum_support:
+
+      test:
+        total: 5000
+        positive: 500
+        negative: 2500
+
+    calibration:
+
+      enabled: true
+
+      fit_dataset: "validation"
+
+      evaluate_dataset: "test"
+
+      forbidden_fit_datasets:
+        - "test"
+        - "ood"
+        - "production"
+
+      metrics:
+
+        expected_calibration_error:
+          maximum: 0.0400
+          bins: 15
+          binning: "uniform"
+          gate_on: "upper_confidence_bound"
+
+        brier_score:
+          maximum: 0.0700
+          gate_on: "upper_confidence_bound"
+
+        log_loss:
+          maximum: 0.2500
+          gate_on: "upper_confidence_bound"
+
+      require_reliability_curve: true
+
+    regression:
+
+      enabled: true
+
+      baseline_required: true
+
+      limits:
+
+        pr_auc:
+          maximum_degradation: 0.0000
+          confidence_bound: "lower"
+
+        recall:
+          maximum_degradation: 0.0010
+          confidence_bound: "lower"
+
+        fpr:
+          maximum_increase: 0.0002
+          confidence_bound: "upper"
+
+        precision:
+          maximum_degradation: 0.0010
+          confidence_bound: "lower"
+
+      mcnemar_required: true
+
+    critical_slices:
+
+      homoglyph_attacks:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9950
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9700
+          gate_on: "lower_confidence_bound"
+
+      shortened_urls:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9880
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9500
+          gate_on: "lower_confidence_bound"
+
+      ip_address_hosts:
+
+        required: true
+
+        minimum_samples: 200
+
+        precision:
+          minimum: 0.9980
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9800
+          gate_on: "lower_confidence_bound"
+
+      newly_registered_domains:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9850
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9400
+          gate_on: "lower_confidence_bound"
+
+
+  # ============================================================================
+  # ATTACHMENT CLASSIFIER
+  # ============================================================================
+
+  attachment_classifier:
+
+    enabled: true
+
+    model_id: "attachment_classifier"
+
+    task_type: "binary_classification"
+
+    positive_label: 1
+
+    primary_metric: "pr_auc"
+
+    threshold:
+
+      expected_value: 0.950000
+
+      tolerance: 0.000001
+
+      source: "validated_threshold_artifact"
+
+      require_manifest_match: true
+
+      forbid_test_set_optimization: true
+
+    evaluation_sets:
+
+      validation:
+        required: true
+
+      test:
+        required: true
+
+      out_of_distribution:
+        required: true
+
+    global_thresholds:
+
+      precision:
+        minimum: 0.9980
+        gate_on: "lower_confidence_bound"
+
+      recall:
+        minimum: 0.9300
+        gate_on: "lower_confidence_bound"
+
+      f1:
+        minimum: 0.9629
+        gate_on: "lower_confidence_bound"
+
+      roc_auc:
+        minimum: 0.9940
+        gate_on: "lower_confidence_bound"
+
+      pr_auc:
+        minimum: 0.9750
+        gate_on: "lower_confidence_bound"
+
+      false_positive_rate:
+        maximum: 0.0005
+        gate_on: "upper_confidence_bound"
+
+      false_negative_rate:
+        maximum: 0.0700
+        gate_on: "upper_confidence_bound"
+
+    minimum_support:
+
+      test:
+        total: 5000
+        positive: 500
+        negative: 2500
+
+    calibration:
+
+      enabled: true
+
+      fit_dataset: "validation"
+
+      evaluate_dataset: "test"
+
+      forbidden_fit_datasets:
+        - "test"
+        - "ood"
+        - "production"
+
+      metrics:
+
+        expected_calibration_error:
+          maximum: 0.0400
+          bins: 15
+          binning: "uniform"
+          gate_on: "upper_confidence_bound"
+
+        brier_score:
+          maximum: 0.0800
+          gate_on: "upper_confidence_bound"
+
+        log_loss:
+          maximum: 0.3000
+          gate_on: "upper_confidence_bound"
+
+      require_reliability_curve: true
+
+    regression:
+
+      enabled: true
+
+      baseline_required: true
+
+      limits:
+
+        pr_auc:
+          maximum_degradation: 0.0000
+          confidence_bound: "lower"
+
+        recall:
+          maximum_degradation: 0.0010
+          confidence_bound: "lower"
+
+        fpr:
+          maximum_increase: 0.00005
+          confidence_bound: "upper"
+
+        precision:
+          maximum_degradation: 0.0010
+          confidence_bound: "lower"
+
+      mcnemar_required: true
+
+    critical_slices:
+
+      vba_macro_documents:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9990
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9600
+          gate_on: "lower_confidence_bound"
+
+      weaponized_pdf_streams:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9980
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9400
+          gate_on: "lower_confidence_bound"
+
+      encrypted_archives:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9950
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9100
+          gate_on: "lower_confidence_bound"
+
+      polyglot_payloads:
+
+        required: true
+
+        minimum_samples: 300
+
+        precision:
+          minimum: 0.9900
+          gate_on: "lower_confidence_bound"
+
+        recall:
+          minimum: 0.9000
+          gate_on: "lower_confidence_bound"
+
+
+# ==============================================================================
+# 10. OOD EVALUATION
+# ==============================================================================
+
+ood_evaluation:
+
+  enabled: true
+
+  required_for_production: true
+
+  dataset:
+
+    identifier: "ood_holdout_v13"
+
+    frozen: true
+
+    immutable: true
+
+    require_manifest: true
+
+    require_sha256: true
+
+  metrics:
+
+    roc_auc:
+
+      minimum: 0.9500
+
+      gate_on: "lower_confidence_bound"
+
+    pr_auc:
+
+      minimum: 0.9000
+
+      gate_on: "lower_confidence_bound"
+
+    false_positive_rate:
+
+      maximum: 0.0100
+
+      gate_on: "upper_confidence_bound"
+
+  distribution_shift:
+
+    compare_to_test: true
+
+    required: true
+
+    methods:
+
+      - "psi"
+      - "ks_test"
+
+    warning_thresholds:
+
+      psi: 0.10
+
+    critical_thresholds:
+
+      psi: 0.25
+
+  # --------------------------------------------------------------------------
+  # Selective prediction / abstention
+  # --------------------------------------------------------------------------
+
+  abstention:
+
+    enabled: true
+
+    required_for_production: true
+
+    confidence_policy:
+
+      minimum_confidence: 0.60
+
+      confidence_definition: "max_class_probability"
+
+    metrics:
+
+      coverage:
+
+        minimum: 0.90
+
+        gate_on: "lower_confidence_bound"
+
+      abstention_rate:
+
+        maximum: 0.10
+
+        gate_on: "upper_confidence_bound"
+
+      selective_risk:
+
+        maximum: 0.020
+
+        gate_on: "upper_confidence_bound"
+
+      abstained_sample_error_rate:
+
+        maximum: 1.00
+
+        gate_on: "informational"
+
+    safety:
+
+      never_auto_block_abstained_sample: true
+
+      route_abstained_samples_to: "sandbox_or_human_review"
+
+      require_safe_fallback: true
+
+
+# ==============================================================================
+# 11. THRESHOLD VALIDATION
+# ==============================================================================
+
+threshold_validation:
+
+  enabled: true
+
+  required_for_production: true
+
+  selection_dataset: "validation"
+
+  validation_dataset: "test"
+
+  forbidden_selection_datasets:
+
+    - "test"
+    - "ood"
+    - "production"
+
+  threshold_search:
+
+    enabled: true
+
+    minimum_threshold: 0.01
+
+    maximum_threshold: 0.99
+
+    step: 0.001
+
+  threshold_stability:
+
+    enabled: true
+
+    bootstrap_samples: 2000
+
+    maximum_threshold_stddev: 0.05
+
+    require_stable_operating_region: true
+
+  operating_point:
+
+    must_satisfy_all_hard_constraints: true
+
+    prefer_highest_recall_under_fpr_constraint: true
+
+  artifact:
+
+    required: true
+
+    filename: "validated_threshold.json"
+
+    require_sha256: true
+
+    require_model_hash_match: true
+
+    require_dataset_hash_match: true
+
+    require_config_hash_match: true
+
+
+# ==============================================================================
+# 12. SLICE EVALUATION POLICY
+# ==============================================================================
+
+slice_evaluation:
+
+  enabled: true
+
+  required_for_production: true
+
+  evaluate_all_declared_critical_slices: true
+
+  minimum_support_enforced: true
+
+  prohibit_silent_slice_exclusion: true
+
+  missing_slice_behavior: "fail"
+
+  insufficient_support_behavior: "fail"
+
+  metrics:
+
+    precision: true
+    recall: true
+    f1: true
+    false_positive_rate: true
+    false_negative_rate: true
+    pr_auc: true
+
+  degradation:
+
+    compare_against_global_test_metrics: true
+
+    maximum_relative_degradation: 0.10
+
+    maximum_absolute_recall_drop: 0.05
+
+    maximum_absolute_precision_drop: 0.05
+
+  reporting:
+
+    generate_slice_table: true
+
+    generate_failure_examples: true
+
+    store_raw_examples: false
+
+
+# ==============================================================================
+# 13. CALIBRATION POLICY
+# ==============================================================================
+
+calibration_policy:
+
+  enabled: true
+
+  required_for_production: true
+
+  fit_only_on_validation: true
+
+  evaluate_only_on_unseen_data: true
+
+  forbidden_calibration_data:
+
+    - "test"
+    - "ood"
+    - "production"
+
+  methods:
+
+    primary: "temperature_scaling"
+
+    alternatives:
+
+      - "sigmoid"
+
+  metrics:
+
+    ece:
+
+      enabled: true
+
+      bins: 15
+
+      strategy: "uniform"
+
+      maximum: 0.0500
+
+    brier:
+
+      enabled: true
+
+      maximum: 0.1000
+
+    log_loss:
+
+      enabled: true
+
+      maximum: 0.3000
+
+  requirements:
+
+    generate_reliability_diagram: true
+
+    generate_calibration_report: true
+
+    persist_calibration_parameters: true
+
+    hash_calibration_artifact: true
+
+
+# ==============================================================================
+# 14. PRODUCTION BASELINE CONTRACT
+# ==============================================================================
+
+production_baseline:
+
+  required_for_production: true
+
+  source: "model_registry"
+
+  selection_policy:
+
+    status: "production"
+
+    must_be_known_good: true
+
+    must_have_passed_previous_gates: true
+
+    must_have_valid_signature: true
+
+    must_have_valid_manifest: true
+
+  integrity:
+
+    require_sha256: true
+
+    require_model_hash: true
+
+    require_feature_schema_hash: true
+
+    require_preprocessing_hash: true
+
+  comparison:
+
+    paired_test_set: true
+
+    same_threshold_policy: true
+
+    same_preprocessing_contract: true
+
+    same_label_mapping: true
+
+    same_evaluation_protocol: true
+
+
+# ==============================================================================
+# 15. GATE SEVERITY & DECISION MODEL
+# ==============================================================================
+
+gate_decision:
+
+  statuses:
+
+    PASS:
+      terminal: false
+
+    WARN:
+      terminal: false
+
+    NOT_APPLICABLE:
+      terminal: false
+
+    FAIL:
+      terminal: true
+
+    ERROR:
+      terminal: true
+
+  required_gate_states:
+
+    production:
+
+      allowed:
+
+        - "PASS"
+
+      forbidden:
+
+        - "WARN"
+        - "NOT_APPLICABLE"
+        - "FAIL"
+        - "ERROR"
+
+  warning_policy:
+
+    allowed_in_development: true
+
+    allowed_in_test: false
+
+    allowed_in_staging: false
+
+    allowed_in_production: false
+
+  final_decision:
+
+    all_required_gates_must_pass: true
+
+    any_error_blocks_promotion: true
+
+    any_required_gate_failure_blocks_promotion: true
+
+    missing_metric_blocks_promotion: true
+
+    missing_provenance_blocks_promotion: true
+
+
+# ==============================================================================
+# 16. PROVENANCE REQUIREMENTS
+# ==============================================================================
+
+provenance:
+
+  required: true
+
+  required_fields:
+
+    - "model_id"
+    - "model_version"
+    - "artifact_version"
+
+    - "model_sha256"
+    - "manifest_sha256"
+
+    - "dataset_id"
+    - "dataset_version"
+    - "dataset_manifest_sha256"
+
+    - "feature_schema_version"
+    - "feature_schema_sha256"
+
+    - "preprocessing_version"
+    - "preprocessing_sha256"
+
+    - "evaluation_timestamp"
+
+    - "evaluation_config_version"
+    - "evaluation_config_sha256"
+
+    - "evaluator_version"
+
+    - "git_commit"
+    - "git_dirty_state"
+
+    - "python_version"
+    - "framework_versions"
+
+    - "operating_threshold"
+
+    - "gate_status"
+
+    - "failed_checks"
+
+    - "warnings"
+
+  signature:
+
+    required_for_production: true
+
+    algorithm: "ed25519"
+
+    key_reference_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+    never_store_private_key: true
+
+
+# ==============================================================================
+# 17. REPORTING CONTRACT
+# ==============================================================================
+
+reporting:
+
+  enabled: true
+
+  output_directory: "artifacts/reports/evaluation_gates"
+
+  formats:
+
+    json: true
+
+    markdown: true
+
+    csv: true
+
+  filenames:
+
+    summary_json: "evaluation_summary.json"
+
+    detailed_json: "evaluation_details.json"
+
+    markdown: "evaluation_report.md"
+
+    gate_status: "gate_status.json"
+
+    metric_table: "metrics.csv"
+
+    slice_table: "slice_metrics.csv"
+
+    calibration_report: "calibration_report.json"
+
+    regression_report: "regression_report.json"
+
+    statistical_report: "statistical_tests.json"
+
+  report_requirements:
+
+    include_confidence_intervals: true
+
+    include_sample_counts: true
+
+    include_class_distribution: true
+
+    include_threshold: true
+
+    include_baseline_comparison: true
+
+    include_failed_gates: true
+
+    include_warnings: true
+
+    include_dataset_hashes: true
+
+    include_model_hashes: true
+
+    include_config_hash: true
+
+    include_runtime_environment: true
+
+  raw_data:
+
+    store_raw_predictions: false
+
+    store_raw_payloads: false
+
+    store_pii: false
+
+    store_secrets: false
+
+
+# ==============================================================================
+# 18. EXECUTION & RESOURCE CONTROLS
+# ==============================================================================
+
+execution:
+
+  timeout_seconds: 3600
+
+  max_memory_gb: 16
+
+  max_cpu_workers: 8
+
+  parallel_model_evaluation: true
+
+  parallel_slice_evaluation: true
+
+  max_parallel_models: 3
+
+  max_parallel_slices: 8
+
+  cancellation_on_global_failure: true
+
+  retry:
+
+    enabled: false
+
+    reason: >
+      Evaluation failures must not be hidden by automatic retries. Infrastructure
+      retries must be handled by the orchestration layer and recorded separately.
+
+
+# ==============================================================================
+# 19. SECURITY CONTROLS
+# ==============================================================================
+
+security:
+
+  zero_trust_inputs: true
+
+  validate_all_paths: true
+
+  prohibit_path_traversal: true
+
+  prohibit_symlink_escape: true
+
+  require_artifact_hash_before_read: true
+
+  require_dataset_hash_before_evaluation: true
+
+  require_manifest_before_evaluation: true
+
+  prohibit_untrusted_code_execution: true
+
+  prohibit_remote_code_loading: true
+
+  prohibit_network_access_during_evaluation: true
+
+  secrets:
+
+    allowed: false
+
+    environment_references_allowed: true
+
+    log_secrets: false
+
+
+# ==============================================================================
+# 20. ARTIFACT OUTPUT & ATOMICITY
+# ==============================================================================
+
+artifacts:
+
+  evaluation_reports:
+
+    immutable: true
+
+    prohibit_overwrite: true
+
+    require_atomic_write: true
+
+    require_sha256: true
+
+    generate_manifest: true
+
+  gate_result:
+
+    required: true
+
+    filename: "gate_result.json"
+
+    schema_version: "1.0.0"
+
+    immutable: true
+
+    signed_for_production: true
+
+
+# ==============================================================================
+# 21. QUALITY-GATE ENGINE VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  validate_on_startup: true
+
+  fail_on_invalid_configuration: true
+
+  checks:
+
+    schema_validity: true
+
+    model_ids_unique: true
+
+    thresholds_valid: true
+
+    metric_ranges_valid: true
+
+    confidence_levels_valid: true
+
+    bootstrap_configuration_valid: true
+
+    minimum_support_valid: true
+
+    regression_margins_valid: true
+
+    slice_thresholds_valid: true
+
+    dataset_contract_valid: true
+
+    provenance_contract_valid: true
+
+    artifact_contract_valid: true
+
+    security_policy_valid: true
+
+  numeric_ranges:
+
+    probabilities:
+      minimum: 0.0
+      maximum: 1.0
+
+    confidence_level:
+      minimum: 0.90
+      maximum: 0.999
+
+    alpha:
+      minimum: 0.001
+      maximum: 0.10
+
+    bootstrap_samples:
+      minimum: 1000
+      maximum: 100000
+
+  consistency_checks:
+
+    f1_must_be_consistent_with_precision_recall: true
+
+    thresholds_must_match_model_manifest: true
+
+    positive_label_must_match_model_config: true
+
+    feature_schema_must_match_model_manifest: true
+
+    preprocessing_hash_must_match_model_manifest: true
+
+    test_dataset_must_not_be_used_for_threshold_selection: true
+
+    test_dataset_must_not_be_used_for_calibration: true
+
+    ood_dataset_must_not_be_used_for_training: true
+
+    production_baseline_must_not_equal_candidate: true
+
+    required_slices_must_have_support: true
+
+
+# ==============================================================================
+# 22. CLI EXIT CODES
+# ==============================================================================
+
+execution.cli_exit_codes:
+
+  success_all_passed: 0
+
+  gate_failure: 1
+
+  configuration_validation_error: 2
+
+  dataset_integrity_error: 3
+
+  provenance_error: 4
+
+  statistical_evaluation_error: 5
+
+  artifact_validation_error: 6
+
+  security_policy_error: 7
+
+  system_error: 10

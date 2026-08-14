@@ -1,0 +1,900 @@
+# ==============================================================================
+# PhishGuard_AI - URL & Web Security Policy & Rule Definitions
+# Version: 9.1.0 (UPDATED)
+#
+# Production policy for:
+# - URL syntax and obfuscation
+# - IP / userinfo abuse
+# - IDN and homograph impersonation
+# - domain age and reputation
+# - DNS infrastructure anomalies
+# - TLS / certificate anomalies
+# - credential harvesting
+# - visual impersonation
+# - browser anti-analysis
+# - cross-analyzer correlation
+#
+# IMPORTANT:
+# These rules are deterministic policy rules.
+# They should not independently claim "malware" or "zero-day" unless supported
+# by a separate malware/threat-intelligence engine.
+# ==============================================================================
+version: "9.1.0"
+rules:
+  # ============================================================================
+  # 1. URL SYNTAX & DESTINATION OBFUSCATION
+  # ============================================================================
+  - id: URL.SYNTAX.RAW_IP_HOST
+    name: "Raw IP Address Host"
+    enabled: true
+    severity: HIGH
+    score: 35.0
+    category: HOSTNAME_OBFUSCATION
+    description: "URL uses a literal IPv4 or IPv6 address instead of a conventional registered hostname."
+    tags:
+      - url
+      - ip_host
+      - obfuscation
+      - suspicious
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.is_raw_ip"
+          operator: equals
+          value: true
+
+  - id: URL.SYNTAX.USERINFO_DESTINATION_OBFUSCATION
+    name: "URL Userinfo Destination Obfuscation"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: HOSTNAME_OBFUSCATION
+    description: "URL contains userinfo before the destination hostname, a technique commonly used to obscure the actual destination."
+    tags:
+      - url
+      - userinfo
+      - obfuscation
+      - spoofing
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.has_userinfo"
+          operator: equals
+          value: true
+
+  - id: URL.SYNTAX.EXCESSIVE_SUBDOMAIN_DEPTH
+    name: "Excessive Subdomain Depth"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: HOSTNAME_OBFUSCATION
+    description: "Destination hostname contains unusually deep subdomain nesting."
+    tags:
+      - url
+      - subdomain
+      - obfuscation
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.subdomain_count"
+          operator: greater_than
+          value: 4
+
+  - id: URL.SYNTAX.SUSPICIOUS_PORT
+    name: "Non-Standard Web Service Port"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: NETWORK_ANOMALY
+    description: "HTTP or HTTPS destination uses a non-standard TCP port."
+    tags:
+      - url
+      - port
+      - network
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.has_nonstandard_port"
+          operator: equals
+          value: true
+
+  - id: URL.SYNTAX.ENCODED_HOST_OR_PATH
+    name: "Heavy URL Encoding"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: URL_OBFUSCATION
+    description: "URL contains unusually high levels of percent encoding or encoded structural components."
+    tags:
+      - url
+      - encoding
+      - obfuscation
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.has_heavy_encoding"
+          operator: equals
+          value: true
+
+  - id: URL.SYNTAX.HOSTNAME_LENGTH_ANOMALY
+    name: "Abnormally Long Hostname"
+    enabled: true
+    severity: MEDIUM
+    score: 15.0
+    category: HOSTNAME_OBFUSCATION
+    description: "Hostname exceeds the configured anomaly threshold and may be attempting to hide the effective destination."
+    tags:
+      - url
+      - hostname
+      - obfuscation
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.hostname_length"
+          operator: greater_than
+          value: 100
+
+  # ============================================================================
+  # 2. IDN / HOMOGRAPH / BRAND IMPERSONATION
+  # ============================================================================
+  - id: URL.IDN.PUNYCODE_PRESENT
+    name: "Internationalized Domain Name Detected"
+    enabled: true
+    severity: LOW
+    score: 8.0
+    category: DOMAIN_ANOMALY
+    description: "Destination hostname contains an Internationalized Domain Name encoded using Punycode."
+    tags:
+      - idn
+      - punycode
+      - domain
+      - informational
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.is_idn_punycode"
+          operator: equals
+          value: true
+
+  - id: URL.IDN.HOMOGRAPH_CONFUSABLE
+    name: "IDN Homograph / Confusable Domain"
+    enabled: true
+    severity: CRITICAL
+    score: 80.0
+    category: BRAND_IMPERSONATION
+    description: "Hostname contains Unicode confusables or homoglyph patterns consistent with domain impersonation."
+    tags:
+      - idn
+      - homograph
+      - homoglyph
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.has_homograph_confusable"
+          operator: equals
+          value: true
+
+  - id: URL.DOMAIN.TYPOSQUAT_DETECTED
+    name: "Brand Typosquatting / Lookalike Domain"
+    enabled: true
+    severity: CRITICAL
+    score: 80.0
+    category: BRAND_IMPERSONATION
+    description: "Destination domain closely resembles a protected brand using edit distance, token substitution, insertion, deletion, or character transposition."
+    tags:
+      - domain
+      - typosquat
+      - brand
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.is_typosquat"
+          operator: equals
+          value: true
+
+  - id: URL.DOMAIN.BRAND_TOKEN_IN_UNTRUSTED_HOST
+    name: "Protected Brand Token in Untrusted Host"
+    enabled: true
+    severity: HIGH
+    score: 55.0
+    category: BRAND_IMPERSONATION
+    description: "Protected brand terminology appears in an untrusted hostname."
+    tags:
+      - brand
+      - impersonation
+      - hostname
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.contains_brand_token"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  # ============================================================================
+  # 3. DOMAIN AGE / REGISTRATION
+  # ============================================================================
+  - id: URL.DOMAIN.NEWLY_REGISTERED
+    name: "Newly Registered Domain"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "Destination domain was registered recently and therefore has limited historical reputation."
+    tags:
+      - domain
+      - whois
+      - nrd
+      - reputation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.age_days"
+          operator: less_than
+          value: 14
+
+  - id: URL.DOMAIN.VERY_NEW_DOMAIN
+    name: "Very Recently Registered Domain"
+    enabled: true
+    severity: HIGH
+    score: 55.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "Destination domain was registered within the last seven days."
+    tags:
+      - domain
+      - whois
+      - nrd
+      - high_risk
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.age_days"
+          operator: less_than
+          value: 7
+
+  - id: URL.DOMAIN.HIGH_RISK_TLD
+    name: "High-Risk TLD"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "Top-level domain has elevated abuse prevalence according to the configured threat-intelligence policy."
+    tags:
+      - tld
+      - reputation
+      - infrastructure
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.is_high_risk_tld"
+          operator: equals
+          value: true
+
+  - id: URL.DOMAIN.LOW_REPUTATION
+    name: "Low Domain Reputation"
+    enabled: true
+    severity: HIGH
+    score: 40.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "Threat-intelligence or reputation analysis assigns the destination a low trust score."
+    tags:
+      - reputation
+      - threat_intelligence
+      - domain
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.is_low_reputation"
+          operator: equals
+          value: true
+
+  # ============================================================================
+  # 4. DNS / NETWORK INFRASTRUCTURE
+  # ============================================================================
+  - id: URL.DNS.LOW_TTL
+    name: "Unusually Low DNS TTL"
+    enabled: true
+    severity: LOW
+    score: 10.0
+    category: DNS_ANOMALY
+    description: "DNS records use unusually short TTL values."
+    tags:
+      - dns
+      - ttl
+      - infrastructure
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.ttl_seconds"
+          operator: less_than
+          value: 60
+
+  - id: URL.DNS.FAST_FLUX
+    name: "Fast-Flux DNS Infrastructure"
+    enabled: true
+    severity: HIGH
+    score: 55.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "DNS infrastructure demonstrates rapid IP rotation or characteristics associated with fast-flux hosting."
+    tags:
+      - dns
+      - fast_flux
+      - evasion
+      - infrastructure
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.is_fast_flux"
+          operator: equals
+          value: true
+
+  - id: URL.DNS.MULTIPLE_ASN_INFRASTRUCTURE
+    name: "Highly Distributed DNS Infrastructure"
+    enabled: true
+    severity: MEDIUM
+    score: 25.0
+    category: DNS_ANOMALY
+    description: "Destination resolves across an unusually diverse set of autonomous systems."
+    tags:
+      - dns
+      - asn
+      - infrastructure
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.asn_count"
+          operator: greater_than
+          value: 4
+
+  - id: URL.DNS.PARKED_OR_SINKHOLED
+    name: "Parked or Sinkholed Domain"
+    enabled: true
+    severity: LOW
+    score: 10.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: "Destination resolves to infrastructure identified as parked, sinkholed, or otherwise non-operational."
+    tags:
+      - dns
+      - parked
+      - sinkhole
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.is_parked"
+          operator: equals
+          value: true
+
+  # ============================================================================
+  # 5. TLS / CERTIFICATE
+  # ============================================================================
+  - id: URL.SSL.HOSTNAME_MISMATCH
+    name: "TLS Certificate Hostname Mismatch"
+    enabled: true
+    severity: HIGH
+    score: 60.0
+    category: SSL_ANOMALY
+    description: "Presented TLS certificate does not match the requested hostname."
+    tags:
+      - ssl
+      - tls
+      - certificate
+      - mismatch
+    conditions:
+      AND:
+        - field: "metadata.data.ssl_analysis.hostname_matches"
+          operator: equals
+          value: false
+
+  - id: URL.SSL.CERTIFICATE_EXPIRED
+    name: "Expired TLS Certificate"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: SSL_ANOMALY
+    description: "TLS certificate is expired or outside its validity period."
+    tags:
+      - ssl
+      - tls
+      - certificate
+      - expired
+    conditions:
+      AND:
+        - field: "metadata.data.ssl_analysis.is_expired"
+          operator: equals
+          value: true
+
+  - id: URL.SSL.UNTRUSTED_CERTIFICATE
+    name: "Untrusted TLS Certificate"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: SSL_ANOMALY
+    description: "TLS certificate chain cannot be validated against the configured trusted certificate authorities."
+    tags:
+      - ssl
+      - tls
+      - certificate
+      - trust
+    conditions:
+      AND:
+        - field: "metadata.data.ssl_analysis.is_trusted"
+          operator: equals
+          value: false
+
+  - id: URL.SSL.VERY_NEW_CERTIFICATE
+    name: "Very Recently Issued TLS Certificate"
+    enabled: true
+    severity: LOW
+    score: 10.0
+    category: SSL_ANOMALY
+    description: "TLS certificate was issued very recently. This is a weak signal and must not independently establish maliciousness."
+    tags:
+      - ssl
+      - tls
+      - certificate
+      - weak_signal
+    conditions:
+      AND:
+        - field: "metadata.data.ssl_analysis.cert_age_days"
+          operator: less_than
+          value: 1
+
+  # ============================================================================
+  # 6. WEB / DOM CREDENTIAL HARVESTING
+  # ============================================================================
+  - id: URL.WEB.CREDENTIAL_FORM_UNTRUSTED_DOMAIN
+    name: "Credential Form on Untrusted Domain"
+    enabled: true
+    severity: HIGH
+    score: 65.0
+    category: CREDENTIAL_HARVESTING
+    description: "A login or credential form is present on a domain that is not trusted by policy."
+    tags:
+      - web
+      - dom
+      - login
+      - credential_harvesting
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  - id: URL.WEB.PASSWORD_INPUT
+    name: "Password Input Detected"
+    enabled: true
+    severity: LOW
+    score: 8.0
+    category: CREDENTIAL_COLLECTION
+    description: "Rendered DOM contains a password input field."
+    tags:
+      - web
+      - dom
+      - password
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_password_input"
+          operator: equals
+          value: true
+
+  - id: URL.WEB.EXTERNAL_CREDENTIAL_FORM_ACTION
+    name: "Credential Form Submits to External Origin"
+    enabled: true
+    severity: CRITICAL
+    score: 85.0
+    category: CREDENTIAL_HARVESTING
+    description: "Credential input form submits data to a different or externally controlled origin."
+    tags:
+      - web
+      - dom
+      - form
+      - exfiltration
+      - credential_harvesting
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+        - field: "metadata.data.dom_analysis.form_action_cross_origin"
+          operator: equals
+          value: true
+
+  - id: URL.WEB.CREDENTIAL_FORM_BRAND_MISMATCH
+    name: "Credential Form with Brand Identity Mismatch"
+    enabled: true
+    severity: CRITICAL
+    score: 85.0
+    category: BRAND_IMPERSONATION
+    description: "A credential collection interface claims or visually represents a protected brand while operating from an untrusted destination."
+    tags:
+      - web
+      - credential
+      - brand
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.contains_brand_token"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  # ============================================================================
+  # 7. VISUAL IMPERSONATION
+  # ============================================================================
+  - id: URL.WEB.VISUAL_BRAND_IMPERSONATION
+    name: "High-Confidence Visual Brand Impersonation"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: BRAND_IMPERSONATION
+    description: "Rendered page demonstrates high visual similarity to a protected brand interface."
+    tags:
+      - visual
+      - screenshot
+      - brand
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.visual_analysis.similarity_score"
+          operator: greater_than
+          value: 0.90
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  - id: URL.WEB.MODERATE_VISUAL_SIMILARITY
+    name: "Potential Visual Brand Similarity"
+    enabled: true
+    severity: MEDIUM
+    score: 25.0
+    category: BRAND_IMPERSONATION
+    description: "Rendered page has moderate visual similarity to a protected brand and should be evaluated with additional signals."
+    tags:
+      - visual
+      - similarity
+      - brand
+      - weak_signal
+    conditions:
+      AND:
+        - field: "metadata.data.visual_analysis.similarity_score"
+          operator: greater_than
+          value: 0.80
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  # ============================================================================
+  # 8. WEB ANTI-ANALYSIS / EVASION
+  # ============================================================================
+  - id: URL.WEB.ANTI_ANALYSIS_SCRIPT
+    name: "Browser Anti-Analysis Behavior"
+    enabled: true
+    severity: MEDIUM
+    score: 35.0
+    category: EYES_ONLY_OBFUSCATION
+    description: "Page contains browser or automation detection behavior associated with analysis evasion."
+    tags:
+      - web
+      - javascript
+      - anti_analysis
+      - evasion
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_anti_analysis_script"
+          operator: equals
+          value: true
+
+  - id: URL.WEB.JAVASCRIPT_HEAVY_OBFUSCATION
+    name: "Highly Obfuscated JavaScript"
+    enabled: true
+    severity: HIGH
+    score: 50.0
+    category: SCRIPT_OBFUSCATION
+    description: "Web page contains JavaScript with high-confidence obfuscation characteristics."
+    tags:
+      - javascript
+      - obfuscation
+      - web
+    conditions:
+      AND:
+        - field: "metadata.data.dom_analysis.has_heavy_js_obfuscation"
+          operator: equals
+          value: true
+
+  # ============================================================================
+  # 9. REDIRECTION / DELIVERY CHAINS
+  # ============================================================================
+  - id: URL.REDIRECT.EXCESSIVE_CHAIN
+    name: "Excessive Redirect Chain"
+    enabled: true
+    severity: MEDIUM
+    score: 25.0
+    category: REDIRECT_ANOMALY
+    description: "Destination requires an unusually large number of redirects before reaching the final resource."
+    tags:
+      - redirect
+      - chain
+      - evasion
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.redirect_count"
+          operator: greater_than
+          value: 5
+
+  - id: URL.REDIRECT.CROSS_DOMAIN_CHAIN
+    name: "Cross-Domain Redirect Chain"
+    enabled: true
+    severity: HIGH
+    score: 40.0
+    category: REDIRECT_ANOMALY
+    description: "URL navigation crosses multiple unrelated domains before reaching the final destination."
+    tags:
+      - redirect
+      - cross_domain
+      - evasion
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.cross_domain_redirects"
+          operator: greater_than
+          value: 2
+
+  # ============================================================================
+  # 10. COMPOUND CORRELATION RULES
+  # ============================================================================
+  - id: URL.CORRELATION.NEW_DOMAIN_CREDENTIAL_HARVEST
+    name: "New Domain Credential Harvester"
+    enabled: true
+    severity: CRITICAL
+    score: 95.0
+    category: THREAT_CORRELATION
+    description: "Recently registered domain hosts a credential collection interface."
+    tags:
+      - correlation
+      - phishing
+      - credential_harvesting
+      - nrd
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.age_days"
+          operator: less_than
+          value: 14
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  - id: URL.CORRELATION.TYPOSQUAT_CREDENTIAL_HARVEST
+    name: "Typosquat Credential Harvester"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: "Lookalike or typosquatted domain hosts a credential collection interface."
+    tags:
+      - correlation
+      - typosquat
+      - credential_harvesting
+      - phishing
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.is_typosquat"
+          operator: equals
+          value: true
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+
+  - id: URL.CORRELATION.HOMOGRAPH_VISUAL_IMPERSONATION
+    name: "Homograph Visual Impersonation"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: "IDN homograph characteristics coincide with high visual similarity to a protected brand."
+    tags:
+      - correlation
+      - idn
+      - homograph
+      - visual
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.has_homograph_confusable"
+          operator: equals
+          value: true
+        - field: "metadata.data.visual_analysis.similarity_score"
+          operator: greater_than
+          value: 0.85
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  - id: URL.CORRELATION.RAW_IP_LOGIN_TRAP
+    name: "Raw IP Credential Trap"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: THREAT_CORRELATION
+    description: "A raw IP address directly hosts a credential collection interface."
+    tags:
+      - correlation
+      - ip
+      - credential_harvesting
+      - phishing
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.is_raw_ip"
+          operator: equals
+          value: true
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+
+  - id: URL.CORRELATION.USERINFO_LOGIN_TRAP
+    name: "URL Userinfo Credential Trap"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: THREAT_CORRELATION
+    description: "URL userinfo obfuscation is combined with a credential collection interface."
+    tags:
+      - correlation
+      - userinfo
+      - credential_harvesting
+    conditions:
+      AND:
+        - field: "metadata.data.url_analysis.has_userinfo"
+          operator: equals
+          value: true
+        - field: "metadata.data.dom_analysis.has_login_form"
+          operator: equals
+          value: true
+
+  - id: URL.CORRELATION.BRAND_IMPERSONATION_CLUSTER
+    name: "Compound Brand Impersonation"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: "Multiple independent brand impersonation indicators are simultaneously present."
+    tags:
+      - correlation
+      - brand
+      - impersonation
+      - phishing
+    conditions:
+      OR:
+        - AND:
+            - field: "metadata.data.domain_analysis.is_typosquat"
+              operator: equals
+              value: true
+            - field: "metadata.data.dom_analysis.has_login_form"
+              operator: equals
+              value: true
+        - AND:
+            - field: "metadata.data.domain_analysis.has_homograph_confusable"
+              operator: equals
+              value: true
+            - field: "metadata.data.visual_analysis.similarity_score"
+              operator: greater_than
+              value: 0.85
+        - AND:
+            - field: "metadata.data.domain_analysis.contains_brand_token"
+              operator: equals
+              value: true
+            - field: "metadata.data.domain_analysis.is_trusted_domain"
+              operator: equals
+              value: false
+            - field: "metadata.data.dom_analysis.has_login_form"
+              operator: equals
+              value: true
+
+  - id: URL.CORRELATION.MULTI_SIGNAL_PHISHING
+    name: "Multi-Signal Phishing Infrastructure"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: "Multiple independent infrastructure and credential-harvesting indicators collectively indicate a high-risk phishing destination."
+    tags:
+      - correlation
+      - phishing
+      - infrastructure
+      - credential_harvesting
+    conditions:
+      AND:
+        - operator: equals
+          value: true
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 11. NEW: Brand Token Regex Patterns (leverages new matches_regex operator)
+  # ============================================================================
+  - id: URL.DOMAIN.BRAND_TOKEN_REGEX
+    name: "Brand Token Regex Match"
+    enabled: true
+    severity: MEDIUM
+    score: 30.0
+    category: BRAND_IMPERSONATION
+    description: "Protected brand terminology appears in hostname using regex patterns."
+    tags:
+      - domain
+      - brand
+      - regex
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.raw_hostname"
+          operator: matches_regex
+          value: "(?i)(coi?n|log?n|payp?a?l?|amazon|apple|microsoft|google|facebook|paypal|appleid|microsoft|visa|mastercard|americanexpress|netflix|spotify|dropbox|adobe)"
+
+  - id: URL.DOMAIN.BRAND_TOKEN_REGEX2
+    name: "Brand Token Regex Match 2"
+    enabled: true
+    severity: MEDIUM
+    score: 30.0
+    category: BRAND_IMPERSONATION
+    description: "Protected brand terminology appears in hostname using regex patterns."
+    tags:
+      - domain
+      - brand
+      - regex
+      - impersonation
+    conditions:
+      AND:
+        - field: "metadata.data.domain_analysis.raw_hostname"
+          operator: matches_regex
+          value: "(?i)(bankofamerica|chase|wellsfargo|citibank|hsbc|barclays|creditcard|bank|paypal|visa|mastercard)"
+
+  # ============================================================================
+  # 12. NEW: Fast-Flux + Typosquat Correlation (enhanced)
+  # ============================================================================
+  - id: URL.CORRELATION.FAST_FLUX_TYPO
+    name: "Fast-Flux Typosquat Infrastructure"
+    enabled: true
+    severity: CRITICAL
+    score: 85.0
+    category: THREAT_CORRELATION
+    description: "Fast-flux DNS combined with typosquatting."
+    tags:
+      - correlation
+      - fastflux
+      - typosquat
+      - phishing
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.is_fast_flux"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_typosquat"
+          operator: equals
+          value: true
+        - field: "metadata.data.domain_analysis.is_trusted_domain"
+          operator: equals
+          value: false
+
+  # ============================================================================
+  # 13. NEW: Low TTL + New Domain Correlation
+  # ============================================================================
+  - id: URL.CORRELATION.LOW_TTL_NEW_DOMAIN
+    name: "Low TTL + New Domain Infrastructure"
+    enabled: true
+    severity: HIGH
+    score: 60.0
+    category: THREAT_CORRELATION
+    description: "Unusually low DNS TTL combined with newly registered domain."
+    tags:
+      - correlation
+      - ttl
+      - nrd
+      - infrastructure
+    conditions:
+      AND:
+        - field: "metadata.data.dns_analysis.ttl_seconds"
+          operator: less_than
+          value: 60
+        - field: "metadata.data.domain_analysis.age_days"
+          operator: less_than
+          value: 14

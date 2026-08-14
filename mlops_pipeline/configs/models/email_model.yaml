@@ -1,0 +1,1388 @@
+# ==============================================================================
+# PhishGuard_AI - Email Classifier Model Specification
+# Version: 13.0.0
+# Model ID: email_classifier
+#
+# Purpose
+# -------
+# Production-grade model contract for enterprise email threat detection.
+#
+# Detection scope
+# ---------------
+# - phishing
+# - spear-phishing
+# - credential harvesting
+# - Business Email Compromise (BEC)
+# - impersonation
+# - malicious-link delivery
+#
+# Design goals
+# ------------
+# - deterministic training
+# - leakage-resistant datasets
+# - reproducible preprocessing
+# - calibrated probabilities
+# - explicit feature schema
+# - adversarial robustness
+# - safe ONNX deployment
+# - artifact integrity and provenance
+# - compatibility with ml_inference.predictor
+#
+# IMPORTANT
+# ---------
+# Secrets, credentials, tokens, private keys, raw email payloads, and API keys
+# MUST NOT be stored in this configuration.
+# ==============================================================================
+
+
+schema:
+  schema_version: "1.0.0"
+  config_version: "13.0.0"
+  model_config_version: "13.0.0"
+
+  strict:
+    reject_unknown_keys: true
+    reject_unknown_features: true
+    reject_missing_required_fields: true
+
+  compatibility:
+    minimum_pipeline_version: "13.0.0"
+    inference_contract_version: "1.0.0"
+    feature_schema_version: "1.0.0"
+    preprocessing_schema_version: "1.0.0"
+
+
+# ==============================================================================
+# 1. MODEL IDENTITY
+# ==============================================================================
+
+model:
+
+  id: "email_classifier"
+
+  name: "PhishGuard Multi-Modal Email Threat Classifier"
+
+  # Project/configuration baseline.
+  pipeline_version: "13.0.0"
+
+  # Actual model artifact version.
+  #
+  # This MUST be changed when a new trained model is produced.
+  # It is intentionally independent from the project version.
+  artifact_version: "1.0.0"
+
+  type: "hybrid_transformer_tabular"
+
+  task:
+    type: "binary_classification"
+
+    labels:
+      0: "benign"
+      1: "phishing"
+
+    positive_class: 1
+
+    output_semantics: "probability_of_phishing"
+
+  description: >
+    Multi-modal enterprise email threat classifier combining transformer-based
+    body representation with authenticated sender, identity, structural,
+    lexical, and URL-related metadata.
+
+  owner:
+    team: "PhishGuard Threat Intelligence & ML Engineering"
+    service: "email-threat-detection"
+
+  lifecycle:
+    status: "candidate"
+    environments:
+      - "development"
+      - "test"
+      - "staging"
+      - "production"
+
+    production_approval_required: true
+
+  immutability:
+    prohibit_artifact_overwrite: true
+    prohibit_version_reuse: true
+
+
+# ==============================================================================
+# 2. DECISION POLICY
+# ==============================================================================
+
+decision:
+
+  output:
+    raw_model_output: "logit"
+    probability_transform: "sigmoid"
+
+  default_threshold:
+    value: 0.900
+    source: "validated_threshold"
+    fallback_allowed: true
+
+  threshold_selection:
+    enabled: true
+
+    optimization_dataset: "validation"
+
+    forbidden_datasets:
+      - "test"
+      - "production"
+
+    objective:
+      primary: "minimize_false_positive_rate"
+      secondary: "maximize_recall"
+
+    constraints:
+      minimum_precision: 0.995
+      minimum_recall: 0.940
+      maximum_false_positive_rate: 0.001
+
+  calibration:
+    enabled: true
+    method: "temperature_scaling"
+
+    fit_dataset: "validation"
+
+    metrics:
+      - "brier_score"
+      - "expected_calibration_error"
+
+    maximum_brier_score: 0.100
+    maximum_ece: 0.050
+
+  abstention:
+    enabled: true
+
+    # Low-confidence predictions should be routed to downstream rules,
+    # threat intelligence, or analyst review instead of being over-trusted.
+    minimum_confidence: 0.55
+
+    action: "secondary_analysis"
+
+    never_auto_block_on_abstention: true
+
+
+# ==============================================================================
+# 3. DATA CONTRACT
+# ==============================================================================
+
+data_contract:
+
+  input_type: "normalized_email"
+
+  required_fields:
+
+    - "message_id"
+    - "sender_domain"
+    - "recipient_domain"
+    - "subject"
+    - "body"
+    - "headers"
+
+  privacy:
+
+    raw_payload_training_storage: false
+
+    allowed_training_metadata:
+      - "derived_features"
+      - "tokenized_body"
+      - "hashed_domain_identifiers"
+      - "anonymized_labels"
+
+    pii_redaction:
+      enabled: true
+
+    secrets_redaction:
+      enabled: true
+
+  size_limits:
+
+    max_raw_email_mb: 25
+    max_body_characters: 1000000
+    max_subject_characters: 4096
+    max_header_count: 256
+    max_attachment_count: 100
+
+  encoding:
+
+    accepted:
+      - "utf-8"
+
+    invalid_encoding_action: "sanitize_and_record"
+
+  normalization:
+
+    unicode_normalization: "NFKC"
+
+    normalize_newlines: true
+
+    strip_control_characters: true
+
+    preserve_security_relevant_unicode: true
+
+
+# ==============================================================================
+# 4. FEATURE SCHEMA
+# ==============================================================================
+
+features:
+
+  schema:
+
+    version: "1.0.0"
+
+    ordering: "explicit"
+
+    hash_required: true
+
+    hash_algorithm: "sha256"
+
+
+  # --------------------------------------------------------------------------
+  # 4.1 Authentication & Header Features
+  # --------------------------------------------------------------------------
+
+  header_and_authentication:
+
+    enabled: true
+
+    dense_features:
+
+      - name: "spf_status"
+        type: "float32"
+        semantic_type: "categorical_encoded"
+        allowed_values:
+          pass: 1.0
+          fail: 0.0
+          neutral: 0.25
+          softfail: 0.10
+          temperror: 0.20
+          permerror: 0.15
+          none: 0.25
+          unknown: 0.25
+
+      - name: "dkim_status"
+        type: "float32"
+        semantic_type: "categorical_encoded"
+        allowed_values:
+          pass: 1.0
+          fail: 0.0
+          neutral: 0.25
+          temperror: 0.20
+          permerror: 0.15
+          none: 0.25
+          unknown: 0.25
+
+      - name: "dmarc_status"
+        type: "float32"
+        semantic_type: "categorical_encoded"
+        allowed_values:
+          pass: 1.0
+          fail: 0.0
+          quarantine: 0.10
+          reject: 0.0
+          none: 0.25
+          unknown: 0.25
+
+      - name: "sender_domain_age_days"
+        type: "float32"
+        normalizer: "standard"
+        clip_min: 0.0
+        clip_max: 3650.0
+        missing_value: 0.0
+
+      - name: "reply_to_mismatch"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "received_hop_count"
+        type: "float32"
+        normalizer: "robust"
+        clip_min: 0.0
+        clip_max: 100.0
+
+      - name: "external_sender"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "display_name_spoofing"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "sender_domain_recipient_mismatch"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "authentication_alignment_score"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+    total_features: 10
+
+
+  # --------------------------------------------------------------------------
+  # 4.2 Body & Structural Features
+  # --------------------------------------------------------------------------
+
+  body_structure:
+
+    enabled: true
+
+    dense_features:
+
+      - name: "html_to_text_ratio"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 100.0
+
+      - name: "total_link_count"
+        type: "float32"
+        normalizer: "log1p_standard"
+        clip_min: 0.0
+        clip_max: 1000.0
+
+      - name: "ip_link_count"
+        type: "float32"
+        normalizer: "log1p_standard"
+        clip_min: 0.0
+        clip_max: 500.0
+
+      - name: "attachment_count"
+        type: "float32"
+        normalizer: "log1p_standard"
+        clip_min: 0.0
+        clip_max: 100.0
+
+      - name: "urgency_score"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+      - name: "financial_keyword_density"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+      - name: "credential_request_score"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+      - name: "external_form_action"
+        type: "float32"
+        allowed_range: [0.0, 1.0]
+
+      - name: "suspicious_url_density"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+      - name: "hidden_element_score"
+        type: "float32"
+        normalizer: "none"
+        clip_min: 0.0
+        clip_max: 1.0
+
+    total_features: 10
+
+
+  # --------------------------------------------------------------------------
+  # 4.3 Sequence Features
+  # --------------------------------------------------------------------------
+
+  text_sequence:
+
+    enabled: true
+
+    tokenizer:
+
+      family: "wordpiece"
+
+      model_name: "distilbert-base-uncased"
+
+      # Production should pin the exact tokenizer/model revision.
+      revision: "main"
+
+      vocabulary_size: 30522
+
+      lowercase: true
+
+      unicode_normalization: "NFKC"
+
+      special_tokens:
+        pad_token_id: 0
+        unk_token_id: 100
+        cls_token_id: 101
+        sep_token_id: 102
+
+    input_name: "body_token_ids"
+
+    attention_mask_name: "body_attention_mask"
+
+    max_sequence_length: 512
+
+    padding:
+      strategy: "max_length"
+
+    truncation:
+      enabled: true
+      strategy: "longest_first"
+      side: "right"
+
+    sequence_priority:
+      preserve_subject: true
+      preserve_first_body_tokens: true
+      preserve_security_relevant_links: true
+
+    overflow_strategy: "head_tail"
+
+
+# ==============================================================================
+# 5. PREPROCESSING CONTRACT
+# ==============================================================================
+
+preprocessing:
+
+  version: "1.0.0"
+
+  fit_statistics:
+
+    fit_on: "training_only"
+
+    persist: true
+
+    artifact: "email_preprocessing.json"
+
+    hash_algorithm: "sha256"
+
+  numerical:
+
+    reject_nan: true
+    reject_inf: true
+
+    clipping:
+      enabled: true
+
+    missing_values:
+      strategy: "schema_defined"
+
+      reject_unexpected_missing: true
+
+  feature_order:
+
+    source: "features.schema"
+
+    strict: true
+
+  leakage_prevention:
+
+    enabled: true
+
+    prohibit_target_features: true
+
+    prohibit_post_delivery_features: true
+
+    prohibit_analyst_decision_features: true
+
+    prohibit_future_information: true
+
+  text:
+
+    remove_tracking_parameters: false
+
+    # Security-relevant URLs must not be destroyed before feature extraction.
+    preserve_urls: true
+
+    redact_pii_before_tokenization: true
+
+    redact_credentials: true
+
+
+# ==============================================================================
+# 6. DATASET SPLITTING & LEAKAGE CONTROLS
+# ==============================================================================
+
+dataset:
+
+  split:
+
+    train_ratio: 0.70
+    validation_ratio: 0.15
+    test_ratio: 0.15
+
+    random_seed: 42
+
+    stratify_by_label: true
+
+    group_aware: true
+
+    group_keys:
+
+      - "sender_domain"
+      - "campaign_id"
+      - "thread_id"
+
+    temporal_split:
+
+      enabled: true
+
+      enforce_order: true
+
+      test_must_be_newer_than_training: true
+
+  deduplication:
+
+    exact_duplicates: true
+
+    near_duplicates: true
+
+    similarity_threshold: 0.95
+
+  leakage_detection:
+
+    enabled: true
+
+    cross_split_duplicate_detection: true
+
+    sender_campaign_overlap_check: true
+
+    template_similarity_check: true
+
+  minimum_samples:
+
+    total: 10000
+
+    positive: 2000
+
+    negative: 5000
+
+
+# ==============================================================================
+# 7. ARCHITECTURE
+# ==============================================================================
+
+architecture:
+
+  backbone:
+
+    name: "DistilBERT"
+
+    implementation: "HuggingFace"
+
+    model_name: "distilbert-base-uncased"
+
+    revision: "main"
+
+    hidden_size: 768
+
+    max_position_embeddings: 512
+
+    freeze:
+
+      enabled: true
+
+      strategy: "first_n_transformer_layers"
+
+      layers: 4
+
+  text_branch:
+
+    pooling:
+
+      strategy: "masked_mean"
+
+      output_dimension: 768
+
+    dropout: 0.20
+
+  tabular_branch:
+
+    input_dimension: 20
+
+    hidden_dimensions:
+      - 64
+      - 32
+
+    activation: "gelu"
+
+    normalization: "layer_norm"
+
+    dropout: 0.10
+
+  fusion:
+
+    strategy: "concat"
+
+    text_dimension: 768
+
+    tabular_dimension: 32
+
+    fused_dimension: 800
+
+  classification_head:
+
+    layers:
+      - 256
+      - 64
+
+    activation: "gelu"
+
+    normalization: "layer_norm"
+
+    dropout: 0.30
+
+    output_dimension: 1
+
+    final_activation: "none"
+
+    output_semantics: "logit"
+
+
+# ==============================================================================
+# 8. TRAINING
+# ==============================================================================
+
+training:
+
+  batch_size: 32
+
+  epochs: 20
+
+  seed: 42
+
+  optimizer:
+
+    name: "AdamW"
+
+    learning_rate: 0.00003
+
+    weight_decay: 0.01
+
+    eps: 1.0e-8
+
+  parameter_groups:
+
+    enabled: true
+
+    backbone_learning_rate: 0.00002
+
+    classifier_learning_rate: 0.00005
+
+    tabular_learning_rate: 0.00005
+
+  scheduler:
+
+    name: "cosine_with_warmup"
+
+    warmup_ratio: 0.10
+
+    minimum_learning_rate: 1.0e-7
+
+  loss:
+
+    name: "BCEWithLogitsLoss"
+
+    positive_class_weight: 4.0
+
+    label_smoothing: 0.0
+
+  regularization:
+
+    gradient_clipping:
+      enabled: true
+      max_norm: 1.0
+
+  early_stopping:
+
+    enabled: true
+
+    monitor: "validation_pr_auc"
+
+    mode: "max"
+
+    patience: 4
+
+    min_delta: 0.001
+
+  checkpointing:
+
+    enabled: true
+
+    save_best_only: true
+
+    monitor: "validation_pr_auc"
+
+    directory: "artifacts/checkpoints/email_classifier"
+
+    immutable: true
+
+  precision:
+
+    mode: "auto"
+
+    allowed:
+      - "fp32"
+      - "fp16"
+      - "bf16"
+
+    fallback_to_fp32: true
+
+
+# ==============================================================================
+# 9. CLASS IMBALANCE
+# ==============================================================================
+
+class_balance:
+
+  enabled: true
+
+  strategy: "weighted_loss"
+
+  positive_class_weight: 4.0
+
+  maximum_class_weight: 20.0
+
+  require_minority_samples: 2000
+
+  oversampling: false
+
+
+# ==============================================================================
+# 10. ADVERSARIAL ROBUSTNESS
+# ==============================================================================
+
+adversarial:
+
+  enabled: true
+
+  required_for_production: true
+
+  perturbations:
+
+    unicode:
+      enabled: true
+      techniques:
+        - "homoglyph"
+        - "zero_width_character"
+        - "unicode_normalization_variation"
+
+    text:
+      enabled: true
+      techniques:
+        - "whitespace_insertion"
+        - "punctuation_variation"
+        - "benign_paraphrase"
+        - "keyword_obfuscation"
+
+    html:
+      enabled: true
+      techniques:
+        - "html_noise"
+        - "hidden_text"
+        - "attribute_reordering"
+
+    headers:
+      enabled: true
+      techniques:
+        - "display_name_variation"
+        - "reply_to_variation"
+        - "header_order_variation"
+
+    links:
+      enabled: true
+      techniques:
+        - "tracking_parameter_insertion"
+        - "url_encoding"
+        - "redirect_wrapper"
+
+  gates:
+
+    maximum_pr_auc_drop: 0.05
+
+    maximum_recall_drop: 0.05
+
+    maximum_false_positive_increase: 0.02
+
+    fail_on_critical_regression: true
+
+
+# ==============================================================================
+# 11. OUT-OF-DISTRIBUTION DETECTION
+# ==============================================================================
+
+ood:
+
+  enabled: true
+
+  strategy: "confidence_and_embedding_distance"
+
+  confidence:
+
+    minimum_confidence: 0.55
+
+  embedding:
+
+    enabled: true
+
+    reference_dataset: "training"
+
+    distance_metric: "cosine"
+
+  action:
+
+    on_ood: "secondary_analysis"
+
+    allow_automatic_block: false
+
+
+# ==============================================================================
+# 12. ONNX EXPORT CONTRACT
+# ==============================================================================
+
+onnx_export:
+
+  enabled: true
+
+  target_format: "onnx"
+
+  filenames:
+
+    raw: "email_classifier.onnx"
+
+    optimized: "email_classifier_opt.onnx"
+
+    quantized: "email_classifier_int8.onnx"
+
+  opset_version: 17
+
+  runtime:
+
+    minimum_version: "1.18.0"
+
+    execution_provider:
+      preferred:
+        - "CPUExecutionProvider"
+
+      fallback:
+        - "CUDAExecutionProvider"
+
+  inputs:
+
+    - name: "body_token_ids"
+      shape: ["batch_size", 512]
+      data_type: "int64"
+
+    - name: "body_attention_mask"
+      shape: ["batch_size", 512]
+      data_type: "int64"
+
+    - name: "metadata_features"
+      shape: ["batch_size", 20]
+      data_type: "float32"
+
+  outputs:
+
+    - name: "phishing_logit"
+      shape: ["batch_size", 1]
+      data_type: "float32"
+
+  postprocessing:
+
+    probability_transform: "sigmoid"
+
+    probability_range:
+      min: 0.0
+      max: 1.0
+
+    reject_nan: true
+
+    reject_inf: true
+
+  dynamic_axes:
+
+    body_token_ids:
+      0: "batch_size"
+
+    body_attention_mask:
+      0: "batch_size"
+
+    metadata_features:
+      0: "batch_size"
+
+    phishing_logit:
+      0: "batch_size"
+
+  validation:
+
+    run_onnx_checker: true
+
+    verify_input_schema: true
+
+    verify_output_schema: true
+
+    verify_finite_outputs: true
+
+    run_smoke_test: true
+
+    verify_numerical_parity: true
+
+    parity:
+      rtol: 0.001
+      atol: 0.0001
+      validation_samples: 500
+
+  optimization:
+
+    enabled: true
+
+    level: "extended"
+
+  quantization:
+
+    enabled: true
+
+    method: "dynamic_int8"
+
+    require_accuracy_validation: true
+
+    maximum_pr_auc_drop: 0.005
+
+    maximum_roc_auc_drop: 0.005
+
+    maximum_recall_drop: 0.005
+
+    allow_fallback_to_fp32: true
+
+  resource_limits:
+
+    latency_budget_ms:
+      p50: 25.0
+      p95: 45.0
+      p99: 75.0
+
+    batch_size_for_latency_test: 1
+
+    maximum_memory_mb: 512
+
+    maximum_model_size_mb: 512
+
+
+# ==============================================================================
+# 13. PERFORMANCE REQUIREMENTS
+# ==============================================================================
+
+performance:
+
+  inference:
+
+    target_batch_size: 1
+
+    latency:
+
+      p50_ms: 25.0
+      p95_ms: 45.0
+      p99_ms: 75.0
+
+    timeout_ms: 100.0
+
+  throughput:
+
+    minimum_samples_per_second: 10
+
+  resource_limits:
+
+    maximum_cpu_memory_mb: 512
+
+
+# ==============================================================================
+# 14. MODEL QUALITY GATES
+# ==============================================================================
+
+quality_gates:
+
+  required: true
+
+  classification:
+
+    min_precision: 0.995
+
+    min_recall: 0.940
+
+    min_f1: 0.965
+
+    min_roc_auc: 0.992
+
+    min_pr_auc: 0.970
+
+    max_false_positive_rate: 0.001
+
+    max_false_negative_rate: 0.060
+
+  calibration:
+
+    enabled: true
+
+    max_brier_score: 0.100
+
+    max_expected_calibration_error: 0.050
+
+  regression:
+
+    enabled: true
+
+    compare_with_production: true
+
+    maximum_metric_degradation: 0.010
+
+  adversarial:
+
+    required: true
+
+    maximum_performance_drop: 0.050
+
+  fairness:
+
+    required: true
+
+    metrics:
+      - "false_positive_rate"
+      - "false_negative_rate"
+      - "precision"
+      - "recall"
+
+    maximum_fpr_difference: 0.050
+
+    maximum_fnr_difference: 0.050
+
+  failure_policy:
+
+    fail_closed: true
+
+    prohibit_production_promotion: true
+
+
+# ==============================================================================
+# 15. REPRODUCIBILITY
+# ==============================================================================
+
+reproducibility:
+
+  seed: 42
+
+  deterministic: true
+
+  capture:
+
+    dataset_version: true
+
+    dataset_hash: true
+
+    git_commit: true
+
+    git_dirty_state: true
+
+    python_version: true
+
+    framework_version: true
+
+    tokenizer_version: true
+
+    tokenizer_hash: true
+
+    dependency_lock_hash: true
+
+    preprocessing_hash: true
+
+    feature_schema_hash: true
+
+    training_config_hash: true
+
+    exporter_version: true
+
+    onnx_opset: true
+
+
+# ==============================================================================
+# 16. MODEL PROVENANCE
+# ==============================================================================
+
+provenance:
+
+  required: true
+
+  manifest:
+
+    enabled: true
+
+    filename: "email_classifier.manifest.json"
+
+    required_fields:
+
+      - "model_id"
+      - "artifact_version"
+      - "dataset_version"
+      - "dataset_hash"
+      - "feature_schema_version"
+      - "feature_schema_hash"
+      - "preprocessing_version"
+      - "preprocessing_hash"
+      - "training_config_hash"
+      - "git_commit"
+      - "framework_version"
+      - "tokenizer_version"
+      - "onnx_opset"
+      - "artifact_sha256"
+      - "created_at"
+
+  integrity:
+
+    algorithm: "sha256"
+
+    require_checksum: true
+
+  signing:
+
+    enabled: true
+
+    algorithm: "ed25519"
+
+    key_reference_env: "PHISHGUARD_MODEL_SIGNING_KEY"
+
+    production_signature_required: true
+
+
+# ==============================================================================
+# 17. ARTIFACT MANAGEMENT
+# ==============================================================================
+
+artifacts:
+
+  directories:
+
+    checkpoint: "artifacts/checkpoints/email_classifier"
+
+    exported: "artifacts/exported/email_classifier"
+
+    reports: "artifacts/reports/email_classifier"
+
+    quarantine: "artifacts/quarantine/email_classifier"
+
+  immutable: true
+
+  prohibit_overwrite: true
+
+  quarantine_on_failure: true
+
+  required_files:
+
+    - "email_classifier.onnx"
+    - "email_classifier.manifest.json"
+    - "email_preprocessing.json"
+
+  artifact_hash:
+
+    algorithm: "sha256"
+
+    required: true
+
+
+# ==============================================================================
+# 18. PRODUCTION PROMOTION
+# ==============================================================================
+
+promotion:
+
+  eligible: true
+
+  requirements:
+
+    quality_gates: true
+
+    adversarial_evaluation: true
+
+    fairness_evaluation: true
+
+    calibration_validation: true
+
+    onnx_validation: true
+
+    artifact_integrity: true
+
+    artifact_signature: true
+
+    provenance: true
+
+    reproducibility_metadata: true
+
+    human_approval: true
+
+  automatic_production_promotion: false
+
+  atomic_publish: true
+
+  rollback_supported: true
+
+
+# ==============================================================================
+# 19. MONITORING CONTRACT
+# ==============================================================================
+
+monitoring:
+
+  enabled: true
+
+  runtime_metrics:
+
+    - "prediction_count"
+    - "prediction_latency"
+    - "error_rate"
+    - "fallback_rate"
+    - "probability_distribution"
+    - "abstention_rate"
+
+  drift:
+
+    prediction_drift: true
+
+    feature_drift: true
+
+    concept_drift: true
+
+  alerts:
+
+    fallback_rate_threshold: 0.05
+
+    error_rate_threshold: 0.01
+
+    p95_latency_threshold_ms: 45.0
+
+    critical_drift_action: "trigger_evaluation"
+
+  privacy:
+
+    log_raw_email: false
+
+    log_subject: false
+
+    log_body: false
+
+    log_urls: false
+
+    log_recipient_addresses: false
+
+    log_sender_addresses: false
+
+
+# ==============================================================================
+# 20. MODEL CARD METADATA
+# ==============================================================================
+
+model_card:
+
+  intended_use:
+    - "Enterprise phishing detection"
+    - "Security email triage"
+    - "BEC detection assistance"
+    - "Analyst prioritization"
+
+  prohibited_use:
+    - "Fully autonomous high-impact decisions without policy controls"
+    - "Employee performance evaluation"
+    - "Identity verification"
+    - "Law-enforcement attribution"
+
+  known_limitations:
+    - "Highly novel phishing campaigns may be out-of-distribution"
+    - "Encrypted or image-only content may reduce detection quality"
+    - "Language distribution outside training data may reduce accuracy"
+    - "Authentication failures alone do not prove malicious intent"
+
+  human_oversight:
+    required_for_high_impact_action: true
+
+  production_decision_authority:
+    downstream_policy_engine: true
+    model_alone: false
+
+
+# ==============================================================================
+# 21. SECURITY CONTROLS
+# ==============================================================================
+
+security:
+
+  training:
+
+    untrusted_data_isolated: true
+
+    network_access_disabled: true
+
+    arbitrary_code_execution_disabled: true
+
+  model:
+
+    prohibit_untrusted_model_loading: true
+
+    require_signed_artifact: true
+
+    require_checksum: true
+
+  tokenizer:
+
+    require_pinned_revision: true
+
+  dependencies:
+
+    require_lockfile: true
+
+    vulnerability_scan_required: true
+
+  supply_chain:
+
+    dependency_integrity_verification: true
+
+    artifact_provenance_required: true
+
+
+# ==============================================================================
+# 22. CONFIGURATION VALIDATION
+# ==============================================================================
+
+validation:
+
+  enabled: true
+
+  startup_validation: true
+
+  strict_schema_validation: true
+
+  validate_feature_count: true
+
+  validate_feature_order: true
+
+  validate_input_dimensions: true
+
+  validate_label_mapping: true
+
+  validate_threshold_range: true
+
+  validate_training_parameters: true
+
+  validate_onnx_contract: true
+
+  validate_quality_gates: true
+
+  validate_artifact_contract: true
+
+  fail_on_invalid_configuration: true

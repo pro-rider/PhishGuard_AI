@@ -1,0 +1,842 @@
+# ==============================================================================
+# PhishGuard_AI - Email Security Policy & Rule Definitions
+# Version: 9.1.0 (UPDATED)
+#
+# Purpose:
+# Deterministic policy rules for:
+# - Email authentication
+# - Header spoofing
+# - Routing anomalies
+# - Body phishing indicators
+# - Credential harvesting
+# - URL/link abuse
+# - Office macro attacks
+# - PDF exploits
+# - Archive attacks
+# - Executable delivery
+# - Cross-analyzer threat correlation
+#
+# Design principles:
+# 1. Prefer multiple independent indicators over single weak indicators.
+# 2. Avoid treating every anomaly as malicious.
+# 3. Use analyzer findings for high-confidence escalation.
+# 4. Keep rules compatible with the current RuleEngine operators.
+# 5. Keep scores bounded because the RuleEngine caps total score at 100.
+# 6. Favor deterministic rules over NLP-only decisions.
+# ==============================================================================
+version: "9.1.0"
+rules:
+  # ============================================================================
+  # 1. EMAIL AUTHENTICATION
+  # ============================================================================
+  - id: EMAIL.AUTH.DMARC.FAILURE
+    name: "DMARC Authentication Failure"
+    enabled: true
+    severity: HIGH
+    score: 30.0
+    category: HEADER_SPOOFING
+    description: >
+      DMARC authentication failed for the message, indicating that the visible
+      sender identity may not be authorized by the sending infrastructure.
+    tags:
+      - authentication
+      - dmarc
+      - spoofing
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.dmarc_status"
+          operator: contains
+          value:
+            - "fail"
+            - "reject"
+            - "softfail"  # included for broader coverage
+
+  - id: EMAIL.AUTH.DMARC.SOFT_FAILURE
+    name: "DMARC Soft Authentication Failure"
+    enabled: true
+    severity: MEDIUM
+    score: 15.0
+    category: HEADER_SPOOFING
+    description: >
+      DMARC processing produced a soft or non-enforcing failure. This signal
+      requires additional evidence before being considered strong spoofing.
+    tags:
+      - authentication
+      - dmarc
+      - softfail
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.dmarc_status"
+          operator: equals
+          value: "softfail"
+
+  - id: EMAIL.AUTH.SPF.FAILURE
+    name: "SPF Authentication Failure"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: HEADER_SPOOFING
+    description: >
+      SPF validation failed for the envelope sender domain.
+    tags:
+      - authentication
+      - spf
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.spf_status"
+          operator: contains
+          value:
+            - "fail"
+            - "hardfail"
+
+  - id: EMAIL.AUTH.DKIM.FAILURE
+    name: "DKIM Authentication Failure"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: HEADER_SPOOFING
+    description: >
+      DKIM signature validation failed or produced a failing authentication
+      result.
+    tags:
+      - authentication
+      - dkim
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.dkim_status"
+          operator: contains
+          value:
+            - "fail"
+            - "invalid"
+
+  # ============================================================================
+  # 2. STRONG AUTHENTICATION CORRELATION
+  # ============================================================================
+  - id: EMAIL.AUTH.MULTIPLE_FAILURES
+    name: "Multiple Email Authentication Failures"
+    enabled: true
+    severity: HIGH
+    score: 40.0
+    category: HEADER_SPOOFING
+    description: >
+      Multiple independent email authentication mechanisms failed, substantially
+      increasing the likelihood of sender spoofing or unauthorized infrastructure.
+    tags:
+      - authentication
+      - correlation
+      - spoofing
+    conditions:
+      OR:
+        - AND:
+            - field: "metadata.data.header_analysis.spf_status"
+              operator: contains
+              value:
+                - "fail"
+                - "hardfail"
+            - field: "metadata.data.header_analysis.dkim_status"
+              operator: contains
+              value:
+                - "fail"
+                - "invalid"
+        - AND:
+            - field: "metadata.data.header_analysis.dmarc_status"
+              operator: contains
+              value:
+                - "fail"
+                - "reject"
+            - field: "metadata.data.header_analysis.spf_status"
+              operator: contains
+              value:
+                - "fail"
+                - "hardfail"
+
+  # ============================================================================
+  # 3. SENDER / HEADER SPOOFING
+  # ============================================================================
+  - id: EMAIL.HEADER.SENDER_DOMAIN_MISMATCH
+    name: "Header Sender Domain Mismatch"
+    enabled: true
+    severity: MEDIUM
+    score: 25.0
+    category: HEADER_SPOOFING
+    description: >
+      The visible sender domain differs from the envelope or return-path domain.
+      This is suspicious but may also occur in legitimate forwarding systems.
+    tags:
+      - header
+      - spoofing
+      - sender_mismatch
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.sender_domain_mismatch"
+          operator: equals
+          value: true
+
+  - id: EMAIL.HEADER.MISMATCH_WITH_AUTH_FAILURE
+    name: "Sender Mismatch With Authentication Failure"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: HEADER_SPOOFING
+    description: >
+      Sender identity mismatch is accompanied by an authentication failure,
+      substantially increasing the likelihood of impersonation.
+    tags:
+      - spoofing
+      - correlation
+      - authentication
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.sender_domain_mismatch"
+          operator: equals
+          value: true
+        - OR:
+            - field: "metadata.data.header_analysis.dmarc_status"
+              operator: contains
+              value:
+                - "fail"
+                - "reject"
+            - field: "metadata.data.header_analysis.spf_status"
+              operator: contains
+              value:
+                - "fail"
+                - "hardfail"
+            - field: "metadata.data.header_analysis.dkim_status"
+              operator: contains
+              value:
+                - "fail"
+                - "invalid"
+
+  # ============================================================================
+  # 4. MAIL ROUTING ANOMALIES
+  # ============================================================================
+  - id: EMAIL.ROUTING.EXCESSIVE_HOPS
+    name: "Excessive Mail Relay Chain"
+    enabled: true
+    severity: MEDIUM
+    score: 15.0
+    category: ANOMALOUS_ROUTING
+    description: >
+      The email traversed an unusually large number of relay hops.
+    tags:
+      - routing
+      - received
+      - anomaly
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.hop_count"
+          operator: greater_than
+          value: 12
+
+  - id: EMAIL.ROUTING.EXTREME_HOPS
+    name: "Extreme Mail Relay Chain"
+    enabled: true
+    severity: HIGH
+    score: 30.0
+    category: ANOMALOUS_ROUTING
+    description: >
+      The email traversed an extreme number of relay nodes, which may indicate
+      routing abuse, looping infrastructure, or header manipulation.
+    tags:
+      - routing
+      - anomaly
+      - evasion
+    conditions:
+      AND:
+        - field: "metadata.data.header_analysis.hop_count"
+          operator: greater_than
+          value: 25
+
+  # ============================================================================
+  # 5. BODY PHISHING / SOCIAL ENGINEERING
+  # ============================================================================
+  - id: EMAIL.BODY.CREDENTIAL_HARVEST_LURE
+    name: "Credential Harvesting Lure"
+    enabled: true
+    severity: HIGH
+    score: 40.0
+    category: CREDENTIAL_HARVESTING
+    description: >
+      The email contains strong indicators of credential theft or account
+      takeover social engineering.
+    tags:
+      - phishing
+      - credentials
+      - nlp
+    conditions:
+      OR:
+        - field: "metadata.data.body_analysis.lure_type"
+          operator: equals
+          value: "CREDENTIAL_HARVESTING"
+        - field: "metadata.data.nlp_analysis.threat_intent"
+          operator: contains
+          value:
+            - "ACCOUNT_SUSPENSION_URGENCY"
+            - "PASSWORD_RESET"
+            - "CREDENTIAL_REQUEST"
+
+  - id: EMAIL.BODY.HIDDEN_CONTENT
+    name: "Hidden HTML Content"
+    enabled: true
+    severity: MEDIUM
+    score: 20.0
+    category: EYES_ONLY_OBFUSCATION
+    description: >
+      Hidden or visually suppressed HTML content was detected in the message.
+    tags:
+      - html
+      - obfuscation
+      - hidden_content
+    conditions:
+      AND:
+        - field: "metadata.data.body_analysis.has_hidden_elements"
+          operator: equals
+          value: true
+
+  - id: EMAIL.BODY.EXTERNAL_FORM_ACTION
+    name: "External Credential Submission Form"
+    enabled: true
+    severity: HIGH
+    score: 55.0
+    category: CREDENTIAL_HARVESTING
+    description: >
+      The email contains an HTML form that submits user-controlled input to an
+      external endpoint.
+    tags:
+      - html
+      - form
+      - credential_harvesting
+    conditions:
+      AND:
+        - field: "metadata.data.body_analysis.has_external_form_action"
+          operator: equals
+          value: true
+
+  # ============================================================================
+  # 6. HIGH-CONFIDENCE PHISHING BODY CORRELATION
+  # ============================================================================
+  - id: EMAIL.BODY.CREDENTIAL_HARVEST_CORRELATION
+    name: "Credential Harvesting Multi-Signal Correlation"
+    enabled: true
+    severity: CRITICAL
+    score: 80.0
+    category: CREDENTIAL_HARVESTING
+    description: >
+      Multiple independent credential harvesting indicators were detected in
+      the same email.
+    tags:
+      - phishing
+      - credentials
+      - correlation
+      - critical
+    conditions:
+      AND:
+        - OR:
+            - field: "metadata.data.body_analysis.lure_type"
+              operator: equals
+              value: "CREDENTIAL_HARVESTING"
+            - field: "metadata.data.nlp_analysis.threat_intent"
+              operator: contains
+              value:
+                - "ACCOUNT_SUSPENSION_URGENCY"
+                - "PASSWORD_RESET"
+                - "CREDENTIAL_REQUEST"
+        - OR:
+            - field: "metadata.data.body_analysis.has_external_form_action"
+              operator: equals
+              value: true
+            - operator: equals
+              value: true  # placeholder; will be replaced by has_category once RuleEngine exposes it
+
+  # ============================================================================
+  # 7. ATTACHMENT - OFFICE MACROS
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.WEAPONIZED_MACRO
+    name: "Weaponized Office Macro Dropper"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      An Office document contains auto-execution behavior combined with
+      suspicious system execution capabilities.
+    tags:
+      - attachment
+      - office
+      - macro
+      - malware
+    conditions:
+      OR:
+        - operator: equals
+          value: ["MACRO.WEAPONIZED.DROPPER"]
+        - AND:
+            - operator: equals
+              value: ["MACRO.WEAPONIZED.DROPPER"]
+            - operator: equals
+              value: true
+
+  - id: EMAIL.ATTACHMENT.MACRO_DEOBFUSCATION
+    name: "Obfuscated VBA Macro Payload"
+    enabled: true
+    severity: HIGH
+    score: 65.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      VBA macro content contains successfully reconstructed or decoded hidden
+      payload material.
+    tags:
+      - attachment
+      - macro
+      - obfuscation
+    conditions:
+      OR:
+        - operator: equals
+          value: ["MACRO.DEOBFUSCAT ED.PAYLOAD"]
+
+  - id: EMAIL.ATTACHMENT.MACRO_SANDBOX_EVASION
+    name: "Macro Sandbox Evasion"
+    enabled: true
+    severity: HIGH
+    score: 50.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: >
+      Office macro code contains anti-analysis or sandbox-evasion behavior.
+    tags:
+      - macro
+      - evasion
+      - sandbox
+    conditions:
+      OR:
+        - operator: equals
+          value: ["MACRO.EVASION.SANDBOX_TRAP"]
+
+  # ============================================================================
+  # 8. PDF EXPLOIT INDICATORS
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.PDF_LAUNCH_ACTION
+    name: "PDF Launch Executable Action"
+    enabled: true
+    severity: CRITICAL
+    score: 95.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      PDF contains a /Launch action capable of initiating local execution.
+    tags:
+      - attachment
+      - pdf
+      - launch
+      - exploit
+    conditions:
+      OR:
+        - operator: equals
+          value: ["PDF.EXPLOIT.LAUNCH_ACTION"]
+
+  - id: EMAIL.ATTACHMENT.PDF_JAVASCRIPT
+    name: "PDF Embedded JavaScript"
+    enabled: true
+    severity: HIGH
+    score: 65.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      PDF contains embedded JavaScript execution behavior.
+    tags:
+      - pdf
+      - javascript
+      - exploit
+    conditions:
+      OR:
+        - operator: equals
+          value: ["PDF.SCRIPT.JAVASCRIPT"]
+
+  - id: EMAIL.ATTACHMENT.PDF_EMBEDDED_FILE
+    name: "PDF Embedded File Payload"
+    enabled: true
+    severity: HIGH
+    score: 55.0
+    category: MALWARE_DELIVERY
+    description: >
+      PDF contains embedded file content capable of carrying an additional
+      payload.
+    tags:
+      - pdf
+      - embedded_file
+      - payload
+    conditions:
+      OR:
+        - operator: equals
+          value: ["PDF.PAYLOAD.EMBEDDED_FILE"]
+
+  - id: EMAIL.ATTACHMENT.PDF_OVERLAY
+    name: "PDF Trailing Overlay / Polyglot Indicator"
+    enabled: true
+    severity: MEDIUM
+    score: 35.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: >
+      Significant data was detected after the final PDF EOF marker.
+    tags:
+      - pdf
+      - polyglot
+      - evasion
+    conditions:
+      OR:
+        - operator: equals
+          value: ["PDF.EVASION.TRAILING_OVERLAY"]
+
+  # ============================================================================
+  # 9. ARCHIVE ATTACKS
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.ZIP_BOMB
+    name: "Archive Decompression Bomb"
+    enabled: true
+    severity: HIGH
+    score: 70.0
+    category: SUSPICIOUS_INFRASTRUCTURE
+    description: >
+      Archive exhibits characteristics consistent with a decompression bomb.
+    tags:
+      - archive
+      - zip
+      - bomb
+      - denial_of_service
+    conditions:
+      OR:
+        - operator: equals
+          value: ["ZIP.BOMB.HIGH_COMPRESSION_RATIO"]
+
+  - id: EMAIL.ATTACHMENT.EXECUTABLE_IN_ARCHIVE
+    name: "Executable Payload Inside Archive"
+    enabled: true
+    severity: HIGH
+    score: 60.0
+    category: MALWARE_DELIVERY
+    description: >
+      Archive contains executable or potentially executable content.
+    tags:
+      - archive
+      - executable
+      - payload
+    conditions:
+      AND:
+        - field: "metadata.data.attachment_analysis.contains_executable"
+          operator: equals
+          value: true
+
+  # ============================================================================
+  # 10. DANGEROUS ATTACHMENT TYPES
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.DANGEROUS_EXECUTABLE
+    name: "Direct Executable Attachment"
+    enabled: true
+    severity: HIGH
+    score: 65.0
+    category: MALWARE_DELIVERY
+    description: >
+      Email directly contains a Windows executable or script-capable attachment.
+    tags:
+      - attachment
+      - executable
+      - malware_delivery
+    conditions:
+      OR:
+        - field: "metadata.data.attachment_analysis.contains_executable"
+          operator: equals
+          value: true
+        - operator: equals
+          value: true
+
+  # ============================================================================
+  # 11. CROSS-ANALYZER MALWARE CORRELATION
+  # ============================================================================
+  - id: EMAIL.CORRELATION.MALWARE_ATTACHMENT
+    name: "Multi-Analyzer Malicious Attachment"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: >
+      Multiple independent attachment security analyzers identified malicious
+      or exploit-related behavior.
+    tags:
+      - correlation
+      - malware
+      - attachment
+      - critical
+    conditions:
+      AND:
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+        - OR:
+            - operator: equals
+              value: ["MACRO.WEAPONIZED.DROPPER"]
+            - operator: equals
+              value: ["PDF.EXPLOIT.LAUNCH_ACTION"]
+            - operator: equals
+              value: ["ZIP.BOMB.HIGH_COMPRESSION_RATIO"]
+
+  # ============================================================================
+  # 12. CREDENTIAL THEFT + MALWARE DELIVERY
+  # ============================================================================
+  - id: EMAIL.CORRELATION.CREDENTIAL_AND_MALWARE
+    name: "Credential Theft With Malware Delivery"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: >
+      Email combines credential-harvesting behavior with a malicious or
+      exploit-capable attachment.
+    tags:
+      - correlation
+      - phishing
+      - malware
+      - credential_theft
+    conditions:
+      AND:
+        - operator: equals
+          value: true
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 13. SPOOFING + PHISHING CORRELATION
+  # ============================================================================
+  - id: EMAIL.CORRELATION.SPOOFING_AND_PHISHING
+    name: "Sender Spoofing With Phishing Intent"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: THREAT_CORRELATION
+    description: >
+      Email authentication/header anomalies correlate with credential
+      harvesting or phishing intent.
+    tags:
+      - correlation
+      - spoofing
+      - phishing
+    conditions:
+      AND:
+        - operator: equals
+          value: true
+        - operator: equals
+          value: true
+
+  # ============================================================================
+  # 14. HIGH-CONFIDENCE COMPOUND PHISHING
+  # ============================================================================
+  - id: EMAIL.CORRELATION.COMPOUND_PHISHING_ATTACK
+    name: "Compound High-Risk Phishing Attack"
+    enabled: true
+    severity: CRITICAL
+    score: 100.0
+    category: THREAT_CORRELATION
+    description: >
+      Multiple independent indicators identify the message as a coordinated
+      phishing attack involving social engineering and a malicious delivery
+      mechanism.
+    tags:
+      - correlation
+      - phishing
+      - critical
+      - compound
+    conditions:
+      AND:
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 15. MULTIPLE INDEPENDENT HIGH-RISK FINDINGS
+  # ============================================================================
+  - id: EMAIL.CORRELATION.MULTI_ENGINE_HIGH_RISK
+    name: "Multiple Independent High-Risk Analyzer Findings"
+    enabled: true
+    severity: CRITICAL
+    score: 85.0
+    category: THREAT_CORRELATION
+    description: >
+      Multiple independent analyzers produced high-risk security findings for
+      the same email.
+    tags:
+      - correlation
+      - analyzer
+      - high_confidence
+    conditions:
+      AND:
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 16. HIGH-RISK ATTACHMENT + AUTHENTICATION FAILURE
+  # ============================================================================
+  - id: EMAIL.CORRELATION.AUTH_FAILURE_DANGEROUS_ATTACHMENT
+    name: "Authentication Failure With Dangerous Attachment"
+    enabled: true
+    severity: CRITICAL
+    score: 90.0
+    category: THREAT_CORRELATION
+    description: >
+      Authentication failure is combined with a malicious or exploit-capable
+      attachment, substantially increasing confidence in an attack.
+    tags:
+      - correlation
+      - authentication
+      - attachment
+      - spoofing
+    conditions:
+      AND:
+        - OR:
+            - field: "metadata.data.header_analysis.dmarc_status"
+              operator: contains
+              value:
+                - "fail"
+                - "reject"
+            - field: "metadata.data.header_analysis.spf_status"
+              operator: contains
+              value:
+                - "fail"
+                - "hardfail"
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 17. ANALYZER FAILURE / DEGRADED SECURITY MODE
+  # ============================================================================
+  - id: EMAIL.SYSTEM.ANALYZER_DEGRADED
+    name: "Security Analyzer Degraded"
+    enabled: true  # ENABLED after analyzer-health metadata is exposed
+    severity: MEDIUM
+    score: 10.0
+    category: ANALYZER_DEGRADED
+    description: >
+      One or more security analyzers failed or timed out. This rule should only
+      be enabled after analyzer health is explicitly represented in ScanContext.
+    tags:
+      - system
+      - analyzer
+      - degraded
+      - fail_safe
+    conditions:
+      OR:
+        - operator: equals
+          value: true
+
+  # ============================================================================
+  # 18. POLICY / RISK ESCALATION
+  # ============================================================================
+  - id: EMAIL.RISK.MULTIPLE_SUSPICIOUS_SIGNALS
+    name: "Multiple Suspicious Email Indicators"
+    enabled: true
+    severity: HIGH
+    score: 50.0
+    category: THREAT_CORRELATION
+    description: >
+      Multiple independent security categories were triggered during analysis.
+    tags:
+      - risk
+      - correlation
+      - defense_in_depth
+    conditions:
+      AND:
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+        - OR:
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+            - operator: equals
+              value: true
+
+  # ============================================================================
+  # 19. NEW: VBA Macro Pattern Detection (uses new matches_regex operator)
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.VBA_PATTERN_ANALYSIS
+    name: "Suspicious VBA Macro Pattern"
+    enabled: true
+    severity: MEDIUM
+    score: 25.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      VBA macro contains common anti-analysis or credential-harvesting patterns.
+    tags:
+      - macro
+      - vba
+      - pattern
+      - evasion
+    conditions:
+      OR:
+        - field: "metadata.data.body_analysis.raw_text"
+          operator: matches_regex
+          value: "(?i)(Chr|StrReverse|CreateObject|Shell|WScript|Auto_Open|Auto_Open|ActiveDocument|ThisDocument|Auto_Open)"
+
+  # ============================================================================
+  # 20. NEW: DDE/XLL Suspicious Indicators (leverages new operators)
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.DDE_XLL_SUSPICIOUS
+    name: "DDE/XLL File Abuse Indicator"
+    enabled: true
+    severity: HIGH
+    score: 45.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      Attachment contains DDE or XLL file references that could execute code.
+    tags:
+      - attachment
+      - dde
+      - xll
+      - exploit
+    conditions:
+      OR:
+        - operator: equals
+          value: ["DDE_XLL_INDICATOR"]
+
+  # ============================================================================
+  # 21. NEW: PDF JavaScript + Launch Correlation (enhanced correlation)
+  # ============================================================================
+  - id: EMAIL.ATTACHMENT.PDF_JS_LAUNCH_CORR
+    name: "PDF JS + Launch Action Correlation"
+    enabled: true
+    severity: CRITICAL
+    score: 85.0
+    category: EXPLOIT_ATTEMPT
+    description: >
+      PDF contains both JavaScript and a /Launch action.
+    tags:
+      - pdf
+      - javascript
+      - launch
+      - exploit
+    conditions:
+      AND:
+        - operator: equals
+          value: ["PDF.SCRIPT.JAVASCRIPT"]
+        - operator: equals
+          value: ["PDF.EXPLOIT.LAUNCH_ACTION"]
