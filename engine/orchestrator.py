@@ -97,6 +97,7 @@ class ScanType(str, Enum):
     URL = "url"
     ATTACHMENT = "attachment"
     COMPREHENSIVE = "comprehensive"
+    DOMAIN = "domain"
 
 
 class AnalyzerResourceClass(str, Enum):
@@ -104,8 +105,10 @@ class AnalyzerResourceClass(str, Enum):
 
     ASYNC_IO = "async_io"
     CPU_BOUND = "cpu_bound"
+    COMPUTE = "compute"
     SUBPROCESS = "subprocess"
     EXTERNAL_NETWORK = "external_network"
+    NETWORK_IO = "network_io"
 
 
 class AnalyzerExecutionStatus(str, Enum):
@@ -731,14 +734,20 @@ class DetectionOrchestrator:
             )
 
             try:
-                if analyzer.resource_class == AnalyzerResourceClass.EXTERNAL_NETWORK:
+                if analyzer.resource_class in (
+                    AnalyzerResourceClass.EXTERNAL_NETWORK,
+                    AnalyzerResourceClass.NETWORK_IO,
+                ):
                     await ExternalNetworkBoundary.validate_target(context)
                     res = await asyncio.wait_for(
                         analyzer.analyze(context, pipeline_deadline),
                         timeout=effective_timeout,
                     )
 
-                elif analyzer.resource_class == AnalyzerResourceClass.CPU_BOUND:
+                elif analyzer.resource_class in (
+                    AnalyzerResourceClass.CPU_BOUND,
+                    AnalyzerResourceClass.COMPUTE,
+                ):
                     loop = asyncio.get_running_loop()
                     res = await asyncio.wait_for(
                         loop.run_in_executor(

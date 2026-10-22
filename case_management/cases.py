@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from case_management.workflow import CaseStatus, CaseWorkflowManager
+from storage.persistence import SqliteStore
 
 # ============================================================================
 # BOUNDS & CONSTANTS
@@ -93,10 +94,30 @@ class CaseManager:
     machine is defined in exactly one place.
     """
 
-    def __init__(self, *, workflow: Optional[CaseWorkflowManager] = None) -> None:
+    def __init__(
+        self,
+        *,
+        workflow: Optional[CaseWorkflowManager] = None,
+        db_path: Optional[str] = None,
+    ) -> None:
         self._workflow = workflow or CaseWorkflowManager()
         self._lock = threading.RLock()
         self._cases: Dict[str, SecurityCase] = {}
+        # Optional durable backend: when a db_path is supplied, records are
+        # written through to SQLite and reloaded on startup so they survive
+        # process restarts. In-memory dict stays the fast read index.
+        self._store = SqliteStore(db_path) if db_path else None
+        if self._store is not None:
+            for _case_id, data in self._store.load_all("cases"):
+                try:
+                    data["status"] = CaseStatus(data["status"])
+                    self._cases[_case_id] = SecurityCase(**data)
+                except Exception:  # noqa: BLE001 - skip corrupt row, keep rest
+                    continue
+
+    def _persist(self, case: SecurityCase) -> None:
+        if self._store is not None:
+            self._store.upsert("cases", case.case_id, case.to_dict())
 
     # ------------------------------------------------------------------
     # Public API
@@ -146,6 +167,7 @@ class CaseManager:
             if count >= MAX_CASES_PER_TENANT:
                 raise CaseError("Per-tenant case limit reached.")
             self._cases[case.case_id] = case
+        self._persist(case)
         return case
 
     def get(self, case_id: str) -> SecurityCase:
@@ -187,6 +209,7 @@ class CaseManager:
         )
         with self._lock:
             self._cases[case_id] = updated
+        self._persist(updated)
         return updated
 
     def update(
@@ -215,6 +238,7 @@ class CaseManager:
         updated = SecurityCase(**data)
         with self._lock:
             self._cases[case_id] = updated
+        self._persist(updated)
         return updated
 
     # ------------------------------------------------------------------

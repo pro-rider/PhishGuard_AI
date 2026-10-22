@@ -65,6 +65,15 @@ FRONTEND_DIR = os.path.abspath(
 )
 DASHBOARD_PATH = os.path.join(FRONTEND_DIR, "operator-dashboard.html")
 
+# Durable persistence: cases & quarantine records are written through to a
+# local SQLite database so they survive process restarts. Override the path
+# with the PHISHGUARD_DB env var for custom deployments.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH = os.environ.get(
+    "PHISHGUARD_DB",
+    os.path.join(PROJECT_ROOT, "storage", "data", "phishguard.db"),
+)
+
 # ============================================================================
 # REQUEST / RESPONSE MODELS
 # ============================================================================
@@ -145,10 +154,10 @@ def create_app() -> FastAPI:
     ):
         orchestrator.register_analyzer(analyzer)
 
-    case_manager = CaseManager()
+    case_manager = CaseManager(db_path=DB_PATH)
     comment_manager = CommentManager()
     evidence_manager = EvidenceManager()
-    quarantine_manager = EmailQuarantineManager()
+    quarantine_manager = EmailQuarantineManager(db_path=DB_PATH)
     alert_manager = AlertManager()
 
     # ------------------------------------------------------------------

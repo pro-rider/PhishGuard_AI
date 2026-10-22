@@ -28,6 +28,7 @@ from storage.object_storage import (
     ObjectNotFoundError,
     object_storage as _default_storage,
 )
+from storage.persistence import SqliteStore
 
 # ============================================================================
 # BOUNDS & CONSTANTS
@@ -122,21 +123,68 @@ class EmailQuarantineManager:
         *,
         storage: Optional[ObjectStorage] = None,
         encryption: Optional[EncryptionManager] = None,
+        db_path: Optional[str] = None,
     ) -> None:
         self._storage = storage or _default_storage
+        # Optional durable backend: records + the encryption key are persisted to
+        # SQLite so quarantined data survives process restarts. In-memory dict
+        # remains the fast read index.
+        self._store = SqliteStore(db_path) if db_path else None
         if encryption is None:
-            # Auto-provision an active in-process key so quarantine works out
-            # of the box (records are stored in-memory too, so the key only
-            # needs to live for the process lifetime). Callers that want
-            # explicit key management can still pass their own manager.
-            _enc = EncryptionManager()
-            _default_key = EncryptionManager.generate_key("auto_default")
-            _enc.add_key(_default_key)
-            _enc.activate(_default_key.key_id)
-            encryption = _enc
+            encryption = (
+                self._build_persistent_encryption()
+                if self._store is not None
+                else self._build_ephemeral_encryption()
+            )
         self._encryption = encryption
         self._lock = threading.RLock()
         self._messages: Dict[str, QuarantinedMessage] = {}
+        if self._store is not None:
+            for _qid, data in self._store.load_all("quarantine"):
+                try:
+                    data["status"] = QuarantineStatus(data["status"])
+                    self._messages[_qid] = QuarantinedMessage(**data)
+                except Exception:  # noqa: BLE001 - skip corrupt row, keep rest
+                    continue
+
+    # ------------------------------------------------------------------
+    # Encryption backend helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_ephemeral_encryption() -> EncryptionManager:
+        """Auto-provision an in-process key (records are ephemeral too)."""
+        _enc = EncryptionManager()
+        _default_key = EncryptionManager.generate_key("auto_default")
+        _enc.add_key(_default_key)
+        _enc.activate(_default_key.key_id)
+        return _enc
+
+    def _build_persistent_encryption(self) -> EncryptionManager:
+        """Load or create a key that survives restarts via the meta table.
+
+        NOTE: persisting key material to a local SQLite store is a dev-grade
+        solution so quarantine stays decryptable across restarts. Production
+        deployments must move key management to Vault / KMS / Key Vault with
+        proper rotation.
+        """
+        key_id = self._store.get_meta("quarantine_key_id")
+        key_b64 = self._store.get_meta("quarantine_key_b64")
+        if key_id and key_b64:
+            try:
+                key = EncryptionManager.from_base64_key(key_id, key_b64)
+                return EncryptionManager(active_key=key)
+            except Exception:  # noqa: BLE001 - key unusable, fall through to fresh
+                pass
+        key = EncryptionManager.generate_key("auto_default")
+        self._store.set_meta("quarantine_key_id", key.key_id)
+        tmp = EncryptionManager(active_key=key)
+        self._store.set_meta("quarantine_key_b64", tmp.encode_key(key.key_id))
+        return EncryptionManager(active_key=key)
+
+    def _persist(self, record: QuarantinedMessage) -> None:
+        if self._store is not None:
+            self._store.upsert("quarantine", record.quarantine_id, record.to_dict())
 
     # ------------------------------------------------------------------
     # Public API
@@ -183,6 +231,7 @@ class EmailQuarantineManager:
             if len(self._messages) >= MAX_QUARANTINED_MESSAGES:
                 raise QuarantineError("Quarantine store is full.")
             self._messages[quarantine_id] = record
+        self._persist(record)
         return record
 
     def get(self, quarantine_id: str) -> QuarantinedMessage:
@@ -235,6 +284,7 @@ class EmailQuarantineManager:
         )
         with self._lock:
             self._messages[quarantine_id] = updated
+        self._persist(updated)
         if new_status in (QuarantineStatus.PURGED,):
             self._prune_body(record)
         return updated

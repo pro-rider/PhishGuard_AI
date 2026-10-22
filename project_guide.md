@@ -182,9 +182,9 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 ## 9. Known Limitations & Roadmap
 
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
-- **Many bundled analyzers are not wired in** because they reference enum members that don't exist (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) and would crash on import, and/or require external services (browser, live DNS/SSL, yara rulesets). To enable them, first extend the enums and provide the required engines.
+- **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
 - Email analyzers are fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap); the composite heuristic uses bounded heuristics on that snippet.
-- In-memory stores for cases / quarantine: production deployments should swap in a database + persistent keyring.
+- **Persistence:** cases + quarantine + the quarantine encryption key now survive restarts via SQLite (`storage/data/phishguard.db`, gitignored, `PHISHGUARD_DB` to override). For production, move to PostgreSQL + Alembic and Vault/KMS key management.
 
 ---
 

@@ -18,6 +18,7 @@ env/
 
 # Runtime / generated artifacts
 storage/objects/
+storage/data/
 _shots/
 *.log
 
