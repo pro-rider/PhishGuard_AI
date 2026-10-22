@@ -33,6 +33,7 @@ from starlette.responses import JSONResponse, Response
 from security.identity import (
     ROLES,
     ROLE_ANALYST,
+    ROLE_VIEWER,
     Principal,
     IdentityStore,
 )
@@ -67,10 +68,13 @@ class AuthenticationError(RuntimeError):
 
 
 def _parse_key_entry(entry: str) -> Tuple[str, str, frozenset]:
-    """Parse ``key`` or ``key|role1,role2|tenant`` into (key, tenant, roles)."""
+    """Parse ``key`` or ``key|role1,role2|tenant`` into (key, tenant, roles).
+
+    Least privilege: a bare key with no explicit role defaults to **viewer**.
+    """
     key = entry.strip()
     tenant = "system"
-    roles = frozenset({ROLE_ANALYST})
+    roles = frozenset({ROLE_VIEWER})
     if "|" in entry:
         parts = entry.split("|")
         key = parts[0].strip()
@@ -92,6 +96,7 @@ class AuthenticationGuard:
         api_keys: Optional[Sequence[str]] = None,
         identity: Optional[IdentityStore] = None,
         exempt_paths: FrozenSet[str] = DEFAULT_EXEMPT_PATHS,
+        dev_insecure: Optional[bool] = None,
     ) -> None:
         self._keys: Set[str] = set()
         self._key_meta: dict = {}
@@ -103,6 +108,16 @@ class AuthenticationGuard:
             self._key_meta[key] = (tenant, roles)
         self._identity = identity
         self._exempt_paths = exempt_paths
+        # Open mode is FAIL-CLOSED by default: only allowed when the operator
+        # explicitly opts in via DEV_INSECURE=true.
+        if dev_insecure is None:
+            try:
+                from config.internal.settings import settings
+
+                dev_insecure = bool(getattr(settings, "DEV_INSECURE", False))
+            except Exception:  # noqa: BLE001
+                dev_insecure = False
+        self._dev_insecure = bool(dev_insecure)
 
     def authenticate(self, request: Request) -> None:
         """Raise :class:`AuthenticationError` when the request is unauthorized."""
@@ -123,7 +138,7 @@ class AuthenticationGuard:
         # 2. Static API key -> principal.
         api_key = request.headers.get(API_KEY_HEADER, "")
         if api_key and self._validate_key(api_key):
-            tenant, roles = self._key_meta.get(api_key, ("system", frozenset({ROLE_ANALYST})))
+            tenant, roles = self._key_meta.get(api_key, ("system", frozenset({ROLE_VIEWER})))
             self._attach(
                 request,
                 Principal(username=f"apikey", tenant=tenant, roles=roles),
@@ -134,12 +149,12 @@ class AuthenticationGuard:
         if auth_header.startswith(BEARER_PREFIX):
             token = auth_header[len(BEARER_PREFIX):].strip()
             if self._validate_key(token):
-                tenant, roles = self._key_meta.get(token, ("system", frozenset({ROLE_ANALYST})))
+                tenant, roles = self._key_meta.get(token, ("system", frozenset({ROLE_VIEWER})))
                 self._attach(request, Principal(username=f"apikey", tenant=tenant, roles=roles))
                 return
 
-        # Open mode: no identity store and no keys configured -> allow, no principal.
-        if self._identity is None and not self._keys:
+        # Open mode is fail-closed: only allowed with an explicit DEV_INSECURE opt-in.
+        if self._dev_insecure and self._identity is None and not self._keys:
             request.state.principal = None
             request.state.roles = frozenset()
             request.state.authenticated = False
@@ -188,7 +203,7 @@ def build_identity_store() -> Optional[IdentityStore]:
             roles = (
                 {r.strip().lower() for r in parts[2].split(",") if r.strip()}
                 if len(parts) > 2 and parts[2].strip()
-                else {ROLE_ANALYST}
+                else {ROLE_VIEWER}
             )
             tenant = parts[3].strip() if len(parts) > 3 and parts[3].strip() else "system"
             store.add_user(username, password, roles=roles, tenant=tenant)

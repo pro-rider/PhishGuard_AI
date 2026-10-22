@@ -43,24 +43,38 @@ pip install -r requirements-ml.txt
 
 The auth guard (`api_gateway/middleware/auth_guard.py`) resolves a caller to a **principal** (identity + roles + tenant) from either a Bearer JWT or a static API key, then role-based access control (`security/rbac.py`'s `require_roles`) enforces Admin / Analyst / Viewer per route.
 
+> **Secure by default (fail-closed).** Open (no-auth) mode is **refused** unless you
+> explicitly set `DEV_INSECURE=true` (local development, localhost-only). A real
+> `SECRET_KEY` (≥32 chars) is required in every non-insecure deployment, and
+> `/docs` + `/openapi.json` are disabled unless `DEV_INSECURE=true`. Use
+> `.\run_server.ps1` for local dev (it sets `DEV_INSECURE=true`).
+
 | Mode | When | Behavior |
 |------|------|----------|
-| **Open** (default for dev) | No `API_KEYS`, no `AUTH_USERS` | All endpoints accessible; no principal attached |
-| **API-key** | `API_KEYS` set | Non-exempt endpoints require `X-API-Key` (or `Authorization: Bearer <key>`). Plain keys grant `analyst`; use `key\|role1,role2\|tenant` for finer control |
+| **Open** (dev only) | No `API_KEYS`, no `AUTH_USERS`, **and** `DEV_INSECURE=true` | All endpoints accessible; no principal attached |
+| **API-key** | `API_KEYS` set | Non-exempt endpoints require `X-API-Key` (or `Authorization: Bearer <key>`). Plain keys grant **`viewer`** (least privilege); use `key\|role1,role2\|tenant` for finer control |
 | **JWT + RBAC** | `AUTH_USERS` set | `POST /auth/token` exchanges credentials for an HS256 JWT carrying roles + tenant; protected routes enforce roles |
 
-Public/exempt endpoints (always open): `/`, `/dashboard`, `/health`, `/ready`, `/metrics`, `/docs`, `/openapi.json`, `/auth/token`.
+Public/exempt endpoints (always open): `/`, `/dashboard`, `/health`, `/ready`, `/metrics`, `/auth/token`. (`/docs` and `/openapi.json` are public **only** in `DEV_INSECURE` mode.)
 
 ### Role matrix
 
 | Route | admin | analyst | viewer |
 |-------|:-----:|:-------:|:------:|
 | `POST /scan` | ✓ | ✓ | — |
+| `POST /scan/async` | ✓ | ✓ | — |
+| `GET /scan/jobs/{id}` | ✓ | ✓ | ✓ |
+| `GET /scan/jobs` | ✓ | ✓ | ✓ |
+| `GET /scan/jobs/{id}/events` | ✓ | ✓ | ✓ |
 | `POST /cases` | ✓ | ✓ | — |
 | `GET /cases` | ✓ | ✓ | ✓ |
 | `POST /quarantine` | ✓ | ✓ | — |
 | `GET /quarantine` | ✓ | ✓ | ✓ |
 | `GET /alerts/severities` | ✓ | ✓ | ✓ |
+| `GET /audit` | ✓ | ✓ | ✓ |
+
+Job reads (`GET /scan/jobs/{id}`, `.../events`) are **tenant-scoped** — a caller
+can never read another tenant's scan.
 
 ### Enabling JWT + RBAC
 
@@ -331,6 +345,8 @@ environment variables or `.env`. The most important knobs:
 | `VIRUSTOTAL_API_KEY` etc. | Threat-intel providers. |
 | `ALLOW_*_ACCESS`, `ENFORCE_SSRF_PROTECTION` | Outbound SSRF guard. |
 | `ENABLE_EXTRA_ANALYZERS` | Default `False`. Registers extra offline analyzers (e.g. `url_parser`) that change weighted aggregation — enable only after re-baselining verdicts on your corpus. |
+| `DEV_INSECURE` | Default `False`. **Fail-closed**: open mode, dev `SECRET_KEY`, and `/docs` are refused unless `true` (local dev, localhost only). `run_server.ps1` sets it. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime (default 30). `/auth/token` also enforces a failed-login lockout (5 failures / 15 min). |
 
 ### 13.3 Database maintenance
 

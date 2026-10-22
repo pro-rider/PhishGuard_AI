@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -147,11 +148,15 @@ class AuthTokenRequest(BaseModel):
 
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
+    # Fail-closed by default: interactive docs / OpenAPI schema are only
+    # exposed when the operator explicitly opts into insecure dev. In a secure
+    # deployment they are disabled (they leak internals / attack surface).
+    dev_insecure = bool(getattr(settings, "DEV_INSECURE", False))
     app = FastAPI(
         title="PhishGuard_AI API",
         version="1.0.0",
-        docs_url="/docs",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if dev_insecure else None,
+        openapi_url="/openapi.json" if dev_insecure else None,
     )
 
     # Middleware order matters: correlation -> tenant -> rate limit -> auth.
@@ -297,9 +302,21 @@ def create_app() -> FastAPI:
         identity = build_identity_store()
         if identity is None:
             raise HTTPException(status_code=401, detail="auth not configured")
+        ip = request.client.host if request.client is not None else "?"
+        if _login_throttle.is_locked(payload.username, ip):
+            raise HTTPException(status_code=429, detail="too many failed login attempts")
         principal = identity.authenticate(payload.username, payload.password)
         if principal is None:
+            _login_throttle.record_failure(payload.username, ip)
+            _record_audit(
+                request,
+                "auth.token.failed",
+                "principal",
+                payload.username,
+                {"ip": ip},
+            )
             raise HTTPException(status_code=401, detail="invalid credentials")
+        _login_throttle.record_success(payload.username, ip)
         token = identity.issue_token(principal)
         ttl = getattr(identity, "_ttl", 1800)
         _record_audit(
@@ -397,11 +414,16 @@ def create_app() -> FastAPI:
         response_model=Dict[str, Any],
         dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
     )
-    async def get_scan_job(job_id: str) -> Dict[str, Any]:
+    async def get_scan_job(job_id: str, request: Request) -> Dict[str, Any]:
+        tenant_id = getattr(request.state, "tenant_id", "system")
         try:
-            return job_manager.get(job_id)
+            job = job_manager.get(job_id)
         except ScanJobNotFoundError:
             raise HTTPException(status_code=404, detail="job not found")
+        # Tenant isolation: a caller must never read another tenant's scan.
+        if (job or {}).get("tenant_id", "system") != tenant_id:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job
 
     @app.get(
         "/scan/jobs",
@@ -418,9 +440,13 @@ def create_app() -> FastAPI:
     )
     async def scan_job_events(job_id: str, request: Request) -> StreamingResponse:
         """Server-sent events stream for a scan job's progress + final result."""
+        tenant_id = getattr(request.state, "tenant_id", "system")
         try:
             job = job_manager.get(job_id)
         except ScanJobNotFoundError:
+            raise HTTPException(status_code=404, detail="job not found")
+        # Tenant isolation for the stream, same as the job read.
+        if (job or {}).get("tenant_id", "system") != tenant_id:
             raise HTTPException(status_code=404, detail="job not found")
 
         async def event_stream():
@@ -666,6 +692,58 @@ async def _run_detection(    orchestrator: DetectionOrchestrator,
         "case_created": result.is_malicious,
         "signals": _build_signals(result),
     }
+
+
+# ============================================================================
+# LOGIN BRUTE-FORCE THROTTLE
+# ============================================================================
+
+_LOGIN_MAX_FAILURES = 5
+_LOGIN_WINDOW_SECONDS = 900      # failures counted within this rolling window
+_LOGIN_LOCKOUT_SECONDS = 900     # how long an account/IP stays locked
+
+
+class _LoginThrottle:
+    """In-memory failed-login throttle (per username + per client IP).
+
+    Fail-closed and fail-open safe: unknown callers simply accumulate counts;
+    a caller over the threshold is rejected with 429 until the lockout elapses.
+    State is per-process — move to Redis for a multi-worker deployment.
+    """
+
+    def __init__(self) -> None:
+        self._failures: dict = {}
+        self._locks: dict = {}
+
+    def _key(self, username: str, ip: str) -> str:
+        return f"{username}|{ip}"
+
+    def record_failure(self, username: str, ip: str) -> None:
+        now = time.time()
+        key = self._key(username, ip)
+        bucket = self._failures.setdefault(key, [])
+        bucket.append(now)
+        # prune stale entries
+        self._failures[key] = [t for t in bucket if now - t < _LOGIN_WINDOW_SECONDS]
+        if len(self._failures[key]) >= _LOGIN_MAX_FAILURES:
+            self._locks[key] = now + _LOGIN_LOCKOUT_SECONDS
+
+    def record_success(self, username: str, ip: str) -> None:
+        key = self._key(username, ip)
+        self._failures.pop(key, None)
+        self._locks.pop(key, None)
+
+    def is_locked(self, username: str, ip: str) -> bool:
+        key = self._key(username, ip)
+        until = self._locks.get(key, 0)
+        if until > time.time():
+            return True
+        if until:
+            self._locks.pop(key, None)
+        return False
+
+
+_login_throttle = _LoginThrottle()
 
 
 # ============================================================================

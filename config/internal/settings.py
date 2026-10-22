@@ -343,6 +343,14 @@ class Settings(BaseSettings):
     # re-baseline phishing vs benign verdicts before promoting to production.
     ENABLE_EXTRA_ANALYZERS: bool = False
 
+    # Secure-by-default posture. The application is FAIL-CLOSED by default:
+    # open (no-auth) mode, dev SECRET_KEY, and /docs /openapi are only allowed
+    # when DEV_INSECURE=true (local development). Production deployments must
+    # leave this OFF, configure real credentials, and never expose open mode.
+    # When DEV_INSECURE=true, HOST is forced to a loopback address and the
+    # process refuses to bind a non-loopback interface.
+    DEV_INSECURE: bool = False
+
     # ========================================================================
     # SSRF / OUTBOUND NETWORK SECURITY
     # ========================================================================
@@ -644,6 +652,18 @@ class Settings(BaseSettings):
         # PRODUCTION SECRET VALIDATION
         insecure_secret = "CHANGE_ME_DEV_ONLY_SECRET_DO_NOT_USE_IN_PRODUCTION"
 
+        # Fail-closed by default: unless explicitly opting into insecure dev,
+        # a real SECRET_KEY is mandatory. This prevents a misconfigured
+        # deployment from silently falling back to the dev secret.
+        if not self.DEV_INSECURE:
+            if self.SECRET_KEY.get_secret_value() == insecure_secret:
+                raise ValueError(
+                    "SECRET_KEY must be explicitly configured. Set DEV_INSECURE=true "
+                    "only for local development."
+                )
+            if len(self.SECRET_KEY.get_secret_value()) < 32:
+                raise ValueError("SECRET_KEY must contain at least 32 characters.")
+
         if self.ENVIRONMENT in {
             EnvironmentOption.STAGING,
             EnvironmentOption.PRODUCTION,
@@ -766,6 +786,10 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Return True when running in production."""
         return self.ENVIRONMENT == EnvironmentOption.PRODUCTION
+
+    def is_insecure_dev(self) -> bool:
+        """True only when the operator explicitly opted into insecure local dev."""
+        return bool(self.DEV_INSECURE)
 
     def is_testing(self) -> bool:
         """Return True when running in test mode."""

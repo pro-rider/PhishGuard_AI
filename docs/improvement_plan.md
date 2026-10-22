@@ -94,3 +94,13 @@ Verified: persistence across restart; Alembic migrations; async job completes + 
 - **Fixed latent CPU-pool bug** — `ConstrainedMetadata` stored an unpicklable `MappingProxyType`, so *any* CPU-bound analyzer (routed to the ProcessPoolExecutor) failed with `cannot pickle 'mappingproxy'`. Added `__reduce__` to make immutable metadata picklable — verified `url_parser` (CPU-bound, SSRF/homograph detection) now succeeds through the pool.
 
 Status vs roadmap: items #6 (observability) and #7 (wire analyzers, safely behind a flag) are now partly done; item #8 (Prometheus) done. Remaining: OTel traces, dashboard SSE live tiles, PostgreSQL-in-prod, Vault/KMS, MIME parsing, YARA store, SIEM/SOAR + gateway connectors, dashboard SPA, CI/CD.
+
+## Delivered this session (round 4 — secure-by-default / auth hardening)
+
+- **Secure by default (fail-closed)** — `DEV_INSECURE` (default **OFF**). Open mode, the dev `SECRET_KEY`, and `/docs` + `/openapi.json` are refused unless the operator explicitly opts in with `DEV_INSECURE=true` (localhost only). `run_server.ps1` now sets it for local dev; production is locked down by default.
+- **Least-privilege API keys** — a bare API key now defaults to **viewer** (was analyst); escalate explicitly via `key|role|tenant`.
+- **Role-matrix audit + tenant isolation** — every route confirmed to carry `require_roles`; **fixed a cross-tenant leak**: `GET /scan/jobs/{id}` and `.../events` are now tenant-scoped (404 for another tenant's job). Full matrix documented in `project_guide.md` §2.
+- **Brute-force protection on `/auth/token`** — in-memory login throttle (5 failures / 15 min window → 429 lockout, reset on success) + failed-login audit rows (`auth.token.failed`). Move to Redis for multi-worker.
+- **Unit tests** — `tests/unit/test_auth_security.py` (fail-closed open mode, least-privilege keys, parse, throttle). Both unit + integration suites green.
+
+**Honest remaining (infra/external-bound, documented, not faked):** KMS/Vault envelope encryption + key rotation (currently dev-grade persisted key), Postgres RLS + real columns (currently JSON-blob tables), Celery/Redis async runner + heartbeats/stuck-job recovery, MIME/header analyzers + full-message parsing, threat-intel feeds with caching, labeled-dataset eval harness (precision/recall), SSRF DNS-pinning/redirect revalidation, CI/CD (ruff/mypy/pytest+coverage/bandit/Trivy), gunicorn+multiprocess+Redis rate limiting, SRI/CSP + cookie-based dashboard auth, API versioning (/v1), case/quarantine CRUD endpoints.
