@@ -89,8 +89,8 @@ input,textarea,select{font-family:inherit}
 
 /* kpi grid */
 .kpi-grid{display:grid;gap:16px;grid-template-columns:1fr;margin-bottom:22px}
-@media(min-width:560px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:980px){.kpi-grid{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:560px){.kpi-grid{grid-template-columns:repeat(3,1fr)}}
+@media(min-width:1080px){.kpi-grid{grid-template-columns:repeat(5,1fr)}}
 .kpi{position:relative;background:linear-gradient(180deg,#111b2e,#0f1829);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 18px 16px;overflow:hidden}
 .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--k,var(--accent));opacity:.8}
 .kpi .lab{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m)}
@@ -299,6 +299,7 @@ table.tbl{width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px
           </div>
         </div>
         <div class="kpi-grid" id="ovKpis">
+          <div class="kpi" style="--k:#5aa7ff"><div class="lab">Scans</div><div class="val" id="kScans">—</div><div class="delta"><span class="dot"></span>run this session</div></div>
           <div class="kpi" style="--k:#35d0b8"><div class="lab">Cases</div><div class="val" id="kCases">—</div><div class="delta"><span class="dot"></span>total in system</div></div>
           <div class="kpi" style="--k:#5aa7ff"><div class="lab">Open Cases</div><div class="val" id="kOpen">—</div><div class="delta"><span class="dot"></span>awaiting action</div></div>
           <div class="kpi" style="--k:#f4873b"><div class="lab">Quarantined</div><div class="val" id="kQuar">—</div><div class="delta"><span class="dot"></span>messages held</div></div>
@@ -699,6 +700,7 @@ table.tbl{width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px
     $('kOpen').textContent = open;
     $('kQuar').textContent = qlist.length;
     $('kHigh').textContent = high;
+    $('kScans').textContent = scans.length;
 
     renderSevChart(list);
     renderActivity(list, qlist);
@@ -787,6 +789,7 @@ table.tbl{width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px
   function renderScanHistory() {
     var body = $('scanHistBody');
     var empty = $('scanHistEmpty');
+    if ($('kScans')) $('kScans').textContent = scans.length;
     if (!scans.length) {
       body.innerHTML = '';
       empty.classList.add('show');

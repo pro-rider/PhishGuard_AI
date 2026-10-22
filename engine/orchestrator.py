@@ -925,7 +925,7 @@ class DetectionOrchestrator:
 
         if result.is_malicious:
             outcome = AuditOutcome.BLOCKED
-            severity = AuditSeverity.HIGH
+            severity = AuditSeverity.CRITICAL
         elif result.execution_state == PipelineExecutionState.COMPLETED:
             outcome = AuditOutcome.SUCCESS
             severity = AuditSeverity.INFO

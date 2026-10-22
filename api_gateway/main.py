@@ -32,6 +32,8 @@ from api_gateway.middleware.tenant_isolation import TenantIsolationMiddleware
 from case_management.cases import CaseManager, CaseStatus, SecurityCase
 from case_management.comments import CommentManager
 from case_management.evidence import EvidenceManager, EvidenceKind
+from engine.analyzers.email.nlp_detector import NLPDetectorAnalyzer
+from engine.analyzers.heuristic_analyzer import HeuristicContentAnalyzer
 from engine.orchestrator import (
     ConstrainedMetadata,
     DetectionOrchestrator,
@@ -133,6 +135,16 @@ def create_app() -> FastAPI:
     )
 
     orchestrator = DetectionOrchestrator()
+    # Register the default analyzer set. Only offline-safe analyzers that produce
+    # genuine signals from the plain-text email / URL input are wired in — analyzers
+    # that depend on RFC822 headers, external storage, a browser, or live network
+    # are intentionally excluded so the pipeline never fails closed spuriously.
+    for analyzer in (
+        NLPDetectorAnalyzer(),
+        HeuristicContentAnalyzer(),
+    ):
+        orchestrator.register_analyzer(analyzer)
+
     case_manager = CaseManager()
     comment_manager = CommentManager()
     evidence_manager = EvidenceManager()
@@ -186,9 +198,21 @@ def create_app() -> FastAPI:
             email_payload=_build_email_payload(payload.email_text, payload.filename),
             enable_sandbox=payload.enable_sandbox,
             enable_yara=payload.enable_yara,
-            metadata=ConstrainedMetadata({"api_gateway": "true"}),
+            metadata=ConstrainedMetadata(
+                {
+                    "api_gateway": "true",
+                    "email_text": (payload.email_text or "")[:1024],
+                }
+            ),
         )
         result: PipelineResult = await orchestrator.run_scan(context)
+
+        # End-to-end closure: escalate confirmed threats straight into the
+        # incident workflow so operators see them on the dashboard without
+        # manual triage. Idempotent per scan_id.
+        if result.is_malicious:
+            _auto_create_case(case_manager, tenant_id, result)
+
         return {
             "scan_id": result.scan_id,
             "scan_type": result.scan_type.value,
@@ -197,6 +221,7 @@ def create_app() -> FastAPI:
             "overall_score": result.overall_score,
             "confidence_score": result.confidence_score,
             "verdict": result.verdict.value,
+            "case_created": result.is_malicious,
         }
 
     # ------------------------------------------------------------------
@@ -278,6 +303,46 @@ def _build_email_payload(
         mime_type="text/plain",
         filename=filename,
     )
+
+
+def _auto_create_case(
+    case_manager: CaseManager, tenant_id: str, result: PipelineResult
+) -> None:
+    """Escalate a confirmed HIGH/CRITICAL scan into an incident case (idempotent)."""
+    scan_id = result.scan_id
+
+    # Idempotency guard: never create two cases for the same scan.
+    for existing in case_manager.list_for_tenant(tenant_id):
+        if existing.custom_fields.get("scan_id") == scan_id:
+            return
+
+    title = f"Auto-detected {result.verdict.value} threat"
+    description = (
+        f"Created automatically from scan {scan_id}. "
+        f"Overall score {result.overall_score}, confidence {result.confidence_score}. "
+        f"Analyzers: {', '.join(sorted(result.analyzer_results.keys()))}."
+    )
+    try:
+        case_manager.create(
+            tenant_id=tenant_id,
+            title=title,
+            description=description,
+            severity=result.verdict.value.lower(),
+            assignee="system",
+            tags=["auto", "scan"],
+            custom_fields={
+                "scan_id": scan_id,
+                "verdict": result.verdict.value,
+                "score": str(result.overall_score),
+            },
+        )
+        logger.info(
+            "Auto-created case for malicious scan %s (verdict=%s)",
+            scan_id,
+            result.verdict.value,
+        )
+    except Exception as exc:  # noqa: BLE001 - case creation must not break the scan
+        logger.warning("Failed to auto-create case for scan %s: %s", scan_id, exc)
 
 
 # ============================================================================
