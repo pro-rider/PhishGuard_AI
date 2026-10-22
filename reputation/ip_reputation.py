@@ -1452,6 +1452,7 @@ class IPSignalAnalyzer:
                         "or customer access infrastructure."
                     ),
                 )
+            )
 
         if observation.hostname_count > 4:
             signals.append(

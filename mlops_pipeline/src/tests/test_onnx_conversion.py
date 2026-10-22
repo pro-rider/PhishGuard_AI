@@ -56,11 +56,12 @@ from tests import (
     assert_probability_array,
 )
 
-from src.stages.04_export_onnx import (
-    convert_to_onnx,
-    export_onnx_stage,
-    verify_onnx_parity,
-)
+import importlib
+
+_export_module = importlib.import_module("src.stages.04_export_onnx")
+convert_to_onnx = _export_module.convert_to_onnx
+export_onnx_stage = _export_module.export_onnx_stage
+verify_onnx_parity = _export_module.verify_onnx_parity
 
 # ---------------------------------------------------------------------------
 # Optional ONNX dependencies

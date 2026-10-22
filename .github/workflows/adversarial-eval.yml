@@ -1,0 +1,19 @@
+name: Adversarial Evaluation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"  # Weekly
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-ml.txt
+      - name: Run adversarial evaluation
+        working-directory: mlops_pipeline
+        run: python -m stages.03_evaluate --mode adversarial

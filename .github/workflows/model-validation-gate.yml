@@ -1,0 +1,19 @@
+name: Model Validation Gate
+
+on:
+  pull_request:
+    paths:
+      - "mlops_pipeline/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-ml.txt
+      - name: Evaluate candidate vs champion
+        working-directory: mlops_pipeline
+        run: python -m stages.03_evaluate --gate

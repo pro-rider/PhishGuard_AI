@@ -1,0 +1,20 @@
+name: Model Registry Sync
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "mlops_pipeline/artifacts/**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-ml.txt
+      - name: Sync candidate models to MLflow
+        working-directory: mlops_pipeline
+        run: python -m stages.02_train --register

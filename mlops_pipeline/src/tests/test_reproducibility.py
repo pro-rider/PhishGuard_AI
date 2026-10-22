@@ -62,8 +62,12 @@ from tests import (
     DEFAULT_FLOAT_RTOL,
     assert_probability_array,
 )
-from src.stages.01_prepare_data import prepare_data_stage
-from src.stages.02_train import train_candidate_model_stage
+import importlib
+
+_prepare_module = importlib.import_module("src.stages.01_prepare_data")
+prepare_data_stage = _prepare_module.prepare_data_stage
+_train_module = importlib.import_module("src.stages.02_train")
+train_candidate_model_stage = _train_module.train_candidate_model_stage
 
 
 # ==============================================================================

@@ -1,0 +1,179 @@
+# ==============================================================================
+# PhishGuard_AI - URL Classifier Model Specification
+# Version: 14.0.0
+# Model ID: url_classifier
+# Tabular gradient-boosting contract (LightGBM primary, HistGB fallback).
+# ==============================================================================
+
+schema:
+  schema_version: "1.0.0"
+  config_version: "14.0.0"
+  model_config_version: "14.0.0"
+
+model:
+  id: "url_classifier"
+  name: "PhishGuard URL Threat Classifier"
+  pipeline_version: "14.0.0"
+  artifact_version: "1.0.0"
+  type: "tabular_gradient_boosting"
+  task:
+    type: "binary_classification"
+    labels: {0: "benign", 1: "phishing"}
+    positive_class: 1
+    output_semantics: "probability_of_phishing"
+  lifecycle:
+    status: "candidate"
+    environments: ["development", "test", "staging", "production"]
+    production_approval_required: true
+
+decision:
+  default_threshold: 0.90
+  threshold_selection:
+    enabled: true
+    optimization_dataset: "validation"
+    objective:
+      primary: "minimize_false_positive_rate"
+      secondary: "maximize_recall"
+    constraints:
+      minimum_precision: 0.995
+      minimum_recall: 0.940
+      maximum_false_positive_rate: 0.001
+  abstention:
+    enabled: true
+    minimum_confidence: 0.55
+    action: "secondary_analysis"
+
+features:
+  schema:
+    version: "1.0.0"
+    ordering: "explicit"
+    hash_required: true
+    hash_algorithm: "sha256"
+
+preprocessing:
+  version: "1.0.0"
+  fit_statistics:
+    fit_on: "training_only"
+    persist: true
+  numerical:
+    reject_nan: true
+    reject_inf: true
+  feature_order:
+    source: "features.schema"
+    strict: true
+  leakage_prevention:
+    enabled: true
+    prohibit_target_features: true
+    prohibit_future_information: true
+
+dataset:
+  split:
+    train_ratio: 0.70
+    validation_ratio: 0.15
+    test_ratio: 0.15
+    random_seed: 42
+    stratify_by_label: true
+    group_aware: true
+    group_keys: ["domain", "campaign_id"]
+    temporal_split:
+      enabled: true
+      test_must_be_newer_than_training: true
+  deduplication:
+    exact_duplicates: true
+    near_duplicates: true
+    similarity_threshold: 0.95
+  minimum_samples:
+    total: 10000
+    positive: 2000
+    negative: 5000
+
+training:
+  backend: "lightgbm"
+  fallback_backend: "sklearn.hist_gradient_boosting"
+  hyperparameters:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 7
+    subsample: 0.9
+    colsample_bytree: 0.8
+    min_child_samples: 20
+  seed: 42
+  early_stopping:
+    enabled: true
+    patience: 20
+  precision: "fp32"
+
+class_balance:
+  enabled: true
+  strategy: "weighted_loss"
+  require_minority_samples: 2000
+
+onnx_export:
+  enabled: true
+  target_format: "onnx"
+  opset_version: 13
+  inputs:
+    - name: "input"
+      shape: ["batch_size", "num_features"]
+      data_type: "float32"
+  outputs:
+    - name: "probabilities"
+      data_type: "float32"
+  validation:
+    run_onnx_checker: true
+    verify_numerical_parity: true
+    parity: {rtol: 0.001, atol: 0.0001, validation_samples: 500}
+
+quality_gates:
+  required: true
+  classification:
+    min_precision: 0.995
+    min_recall: 0.940
+    min_f1: 0.965
+    min_roc_auc: 0.992
+    max_false_positive_rate: 0.001
+  regression:
+    enabled: true
+    compare_with_production: true
+    maximum_metric_degradation: 0.010
+  failure_policy:
+    fail_closed: true
+    prohibit_production_promotion: true
+
+reproducibility:
+  seed: 42
+  deterministic: true
+  capture:
+    dataset_hash: true
+    git_commit: true
+    python_version: true
+    dependency_lock_hash: true
+    feature_schema_hash: true
+    onnx_opset: true
+
+promotion:
+  eligible: true
+  requirements:
+    quality_gates: true
+    onnx_validation: true
+    artifact_integrity: true
+    reproducibility_metadata: true
+    human_approval: true
+  automatic_production_promotion: false
+
+monitoring:
+  enabled: true
+  runtime_metrics: ["prediction_count", "prediction_latency", "error_rate", "fallback_rate"]
+  privacy:
+    log_raw_url: false
+
+security:
+  training:
+    untrusted_data_isolated: true
+    network_access_disabled: true
+  model:
+    prohibit_untrusted_model_loading: true
+    require_signed_artifact: true
+    require_checksum: true
+  supply_chain:
+    dependency_integrity_verification: true

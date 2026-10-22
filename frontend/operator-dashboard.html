@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhishGuard_AI · Operator Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230E1626'/%3E%3Cpath d='M7 19c3.5 0 3.5 2.5 7 2.5s3.5-2.5 7-2.5c2 0 3.4.8 4.5 2' fill='none' stroke='%2335D0B8' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M8 12c3-2 5-2.5 8-2.5s5 .5 8 2.5' fill='none' stroke='%2335D0B8' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://miaoda.feishu.cn" crossorigin>
+<link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://fastly.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<style>
+:root{
+  --bg:#0a101e; --bg2:#0d1524; --surface:#111b2e; --surface2:#16233c;
+  --border:#223149; --border-soft:#1a2740;
+  --text:#e6edf7; --muted:#8ca2be; --dim:#5a6f8e;
+  --accent:#35d0b8; --accent-deep:#1ea88f; --accent-ink:#0a2b25;
+  --info:#7c8ca5; --low:#35d0b8; --medium:#f4b556; --high:#f4873b; --critical:#f04a5b;
+  --ok:#3fd0a8; --warn:#f4b556; --err:#f04a5b;
+  --font-d:"Space Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-b:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --font-m:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+  --radius:14px; --radius-s:9px;
+  --sidebar:236px; --head-h:62px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:auto}
+body{margin:0;background:radial-gradient(1200px 600px at 80% -10%, #13223c 0%, rgba(19,34,60,0) 55%),var(--bg);color:var(--text);font-family:var(--font-b);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer}
+input,textarea,select{font-family:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ===== layout shell ===== */
+.app{min-height:100vh;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:40;height:var(--head-h);display:flex;align-items:center;gap:16px;padding:0 18px;background:rgba(10,16,30,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--border-soft)}
+.brand{display:flex;align-items:center;gap:11px;flex:0 0 auto}
+.brand .mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(150deg,#35d0b8,#17707a);display:grid;place-items:center;box-shadow:0 6px 18px -6px rgba(53,208,184,.55)}
+.brand .mark svg{width:20px;height:20px}
+.brand .name{font-family:var(--font-d);font-weight:700;font-size:18px;letter-spacing:.3px}
+.brand .name b{color:var(--accent);font-weight:700}
+.brand .tag{font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:var(--dim);margin-top:1px}
+
+.topbar .conn{display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;flex-wrap:wrap}
+.field{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius-s);padding:6px 10px}
+.field label{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim)}
+.field input{background:transparent;border:0;outline:0;color:var(--text);font-size:13px;font-family:var(--font-m);width:190px;padding:2px 0}
+.field.key input{width:170px}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-weight:600;font-size:13.5px;padding:9px 15px;border-radius:var(--radius-s);transition:border-color .15s,background .15s,transform .06s;white-space:nowrap}
+.btn:hover{border-color:var(--accent);background:#1a2940}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:linear-gradient(150deg,var(--accent),var(--accent-deep));color:var(--accent-ink);border-color:transparent;font-weight:700}
+.btn.primary:hover{filter:brightness(1.06);border-color:transparent}
+.btn.ghost{background:transparent;border-color:var(--border-soft)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.icon-btn{width:36px;height:36px;display:inline-grid;place-items:center;border:1px solid var(--border-soft);border-radius:var(--radius-s);background:var(--surface);color:var(--muted)}
+.icon-btn:hover{color:var(--text);border-color:var(--accent)}
+.icon-btn svg{width:18px;height:18px}
+
+.sidebar{position:sticky;top:var(--head-h);height:calc(100vh - var(--head-h));width:var(--sidebar);flex:0 0 var(--sidebar);background:linear-gradient(180deg,#0d1524,#0a101e);border-right:1px solid var(--border-soft);display:flex;flex-direction:column;padding:18px 12px;gap:4px;overflow-y:auto}
+.sidebar .sec{font-size:10.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);padding:12px 12px 6px}
+.nav-item{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:var(--radius-s);color:var(--muted);font-weight:500;font-size:14px;cursor:pointer;border:1px solid transparent;transition:background .15s,color .15s}
+.nav-item svg{width:19px;height:19px;flex:0 0 auto}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.03)}
+.nav-item.active{color:var(--accent);background:linear-gradient(90deg,rgba(53,208,184,.13),rgba(53,208,184,.03));border-color:rgba(53,208,184,.25)}
+.nav-item .badge{margin-left:auto;background:rgba(240,74,91,.16);color:var(--critical);font-size:11px;font-family:var(--font-m);padding:1px 8px;border-radius:20px;font-weight:600}
+.sidebar .foot{margin-top:auto;padding:14px 12px 4px;border-top:1px solid var(--border-soft);font-size:11.5px;color:var(--dim)}
+
+.shell{display:flex;flex:1;min-height:0}
+.main{flex:1;min-width:0;padding:26px 30px 60px;max-width:1400px}
+.main > .view{display:none}
+.main > .view.active{display:block;animation:fade .28s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ===== headers ===== */
+.view-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+.view-head h1{font-family:var(--font-d);font-weight:600;font-size:26px;margin:0;letter-spacing:.2px}
+.view-head p{color:var(--muted);margin:5px 0 0;font-size:14px;max-width:640px}
+.crumb{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m);margin-bottom:6px}
+.head-actions{display:flex;gap:10px;align-items:center}
+
+/* ===== cards ===== */
+.card{background:linear-gradient(180deg,#111b2e,#0f1829);border:1px solid var(--border-soft);border-radius:var(--radius);padding:20px}
+.card + .card{margin-top:18px}
+.card h3{font-family:var(--font-d);font-weight:600;font-size:16px;margin:0 0 4px}
+.card .sub{color:var(--dim);font-size:12.5px;margin:0 0 16px}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.cardhead h3{margin:0}
+.sect-label{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m)}
+
+/* kpi grid */
+.kpi-grid{display:grid;gap:16px;grid-template-columns:1fr;margin-bottom:22px}
+@media(min-width:560px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:980px){.kpi-grid{grid-template-columns:repeat(4,1fr)}}
+.kpi{position:relative;background:linear-gradient(180deg,#111b2e,#0f1829);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 18px 16px;overflow:hidden}
+.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--k,var(--accent));opacity:.8}
+.kpi .lab{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m)}
+.kpi .val{font-family:var(--font-m);font-weight:600;font-size:32px;line-height:1.15;margin-top:8px;color:var(--text)}
+.kpi .delta{font-size:12px;color:var(--muted);margin-top:5px;display:flex;gap:6px;align-items:center}
+.kpi .delta .dot{width:7px;height:7px;border-radius:50%;background:var(--k,var(--accent))}
+
+/* ===== tables ===== */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border-soft);border-radius:var(--radius-s);background:#0f1829}
+table.tbl{width:100%;border-collapse:collapse;table-layout:fixed;min-width:640px;font-size:13.5px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m);font-weight:500;padding:11px 14px;border-bottom:1px solid var(--border-soft);background:#111b2e;white-space:nowrap}
+.tbl td{padding:12px 14px;border-bottom:1px solid rgba(34,49,71,.45);vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:rgba(53,208,184,.04)}
+.tbl .mono{font-family:var(--font-m);font-size:12.5px}
+.tbl .ttl{font-weight:600;color:var(--text)}
+.tbl .subc{display:block;color:var(--dim);font-size:12px;margin-top:2px;font-family:var(--font-m)}
+.empty{display:none;padding:44px 20px;text-align:center;color:var(--dim)}
+.empty.show{display:block}
+.empty .eico{width:52px;height:52px;margin:0 auto 14px;border-radius:14px;background:var(--surface2);border:1px solid var(--border-soft);display:grid;place-items:center;color:var(--dim)}
+.empty .eico svg{width:26px;height:26px}
+.empty h4{color:var(--text);margin:0 0 5px;font-family:var(--font-d);font-size:15px}
+.empty p{margin:0;font-size:13.5px}
+
+/* badge / chip */
+.badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-m);font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px;border:1px solid var(--b,transparent);background:var(--bg,transparent);color:var(--c,#e6edf7);white-space:nowrap;letter-spacing:.2px}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:var(--c)}
+.verdict-informational{--c:var(--info);--bg:rgba(124,140,165,.13);--b:rgba(124,140,165,.4)}
+.verdict-low{--c:var(--low);--bg:rgba(53,208,184,.12);--b:rgba(53,208,184,.4)}
+.verdict-medium{--c:var(--medium);--bg:rgba(244,181,86,.12);--b:rgba(244,181,86,.4)}
+.verdict-high{--c:var(--high);--bg:rgba(244,135,59,.13);--b:rgba(244,135,59,.4)}
+.verdict-critical{--c:var(--critical);--bg:rgba(240,74,91,.13);--b:rgba(240,74,91,.45)}
+.st-open{--c:var(--accent);--bg:rgba(53,208,184,.1);--b:rgba(53,208,184,.35)}
+.st-in_progress{--c:#5aa7ff;--bg:rgba(90,167,255,.11);--b:rgba(90,167,255,.4)}
+.st-on_hold{--c:var(--medium);--bg:rgba(244,181,86,.1);--b:rgba(244,181,86,.35)}
+.st-resolved{--c:var(--ok);--bg:rgba(63,208,168,.1);--b:rgba(63,208,168,.35)}
+.st-closed{--c:var(--info);--bg:rgba(124,140,165,.1);--b:rgba(124,140,165,.35)}
+.st-archived{--c:var(--dim);--bg:rgba(90,111,142,.12);--b:rgba(90,111,142,.35)}
+.st-quarantined{--c:var(--critical);--bg:rgba(240,74,91,.11);--b:rgba(240,74,91,.4)}
+.st-released{--c:var(--ok);--bg:rgba(63,208,168,.1);--b:rgba(63,208,168,.35)}
+.st-deleted{--c:var(--info);--bg:rgba(124,140,165,.1);--b:rgba(124,140,165,.35)}
+.st-purged{--c:var(--dim);--bg:rgba(90,111,142,.12);--b:rgba(90,111,142,.35)}
+
+/* ===== scan console ===== */
+.console-grid{display:grid;gap:18px;grid-template-columns:1fr}
+@media(min-width:1020px){.console-grid{grid-template-columns:minmax(360px,1fr) minmax(360px,1fr)}}
+.form-row{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.form-row label{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m);display:flex;align-items:center;gap:7px}
+.form-row label .req{color:var(--critical)}
+.form-row .hint{color:var(--dim);font-size:12px;text-transform:none;letter-spacing:0;font-family:var(--font-b)}
+.input,.textarea,.select{width:100%;background:#0d1524;border:1px solid var(--border-soft);border-radius:var(--radius-s);color:var(--text);padding:11px 13px;font-size:14px;outline:0;transition:border-color .15s}
+.input:focus,.textarea:focus,.select:focus{border-color:var(--accent)}
+.input,.select{font-family:var(--font-m);font-size:13px}
+.textarea{min-height:118px;resize:vertical;font-family:var(--font-m);font-size:13px;line-height:1.55}
+.toggle-row{display:flex;flex-wrap:wrap;gap:10px;margin:2px 0 18px}
+.toggle{display:inline-flex;align-items:center;gap:9px;background:#0d1524;border:1px solid var(--border-soft);border-radius:var(--radius-s);padding:8px 12px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
+.toggle input{display:none}
+.toggle .sw{width:34px;height:19px;border-radius:20px;background:#23324e;position:relative;transition:background .18s;flex:0 0 auto}
+.toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#8ca2be;transition:transform .18s,background .18s}
+.toggle.on{color:var(--text);border-color:rgba(53,208,184,.4)}
+.toggle.on .sw{background:var(--accent)}
+.toggle.on .sw::after{transform:translateX(15px);background:var(--accent-ink)}
+
+/* verdict result */
+.verdict-grid{display:grid;gap:18px;grid-template-columns:1fr;margin-top:18px}
+@media(min-width:1020px){.verdict-grid{grid-template-columns:280px 1fr}}
+.verdict-panel{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;padding:8px 12px 0}
+.verdict-badge{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-m);font-weight:600;font-size:13px;padding:7px 16px;border-radius:26px;border:1px solid var(--b,var(--border));background:var(--bg,#13203a);color:var(--c,var(--text));letter-spacing:.6px}
+.verdict-badge .dot{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.verdict-title{font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m)}
+.gauge{width:100%;height:210px}
+.metrics{display:grid;gap:12px;grid-template-columns:repeat(2,1fr)}
+.metric{background:#0d1524;border:1px solid var(--border-soft);border-radius:var(--radius-s);padding:13px 15px}
+.metric .lab{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-family:var(--font-m)}
+.metric .val{font-family:var(--font-m);font-weight:600;font-size:19px;margin-top:6px;color:var(--text);word-break:break-all}
+.metric .val small{font-size:12px;color:var(--dim);font-weight:500}
+.metric .val.none{color:var(--dim)}
+.spec-list{margin-top:14px;border-top:1px dashed var(--border-soft);padding-top:14px;display:grid;gap:8px}
+.spec{display:flex;justify-content:space-between;gap:14px;font-size:13px}
+.spec .k{color:var(--muted)}
+.spec .v{font-family:var(--font-m);font-size:12.5px;color:var(--text);word-break:break-all;text-align:right}
+
+/* alert banner */
+.banner{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius-s);font-size:13.5px;margin-bottom:18px;border:1px solid}
+.banner.err{background:rgba(240,74,91,.09);border-color:rgba(240,74,91,.4);color:#ffd7db}
+.banner.warn{background:rgba(244,181,86,.09);border-color:rgba(244,181,86,.4);color:#ffe7bd}
+.banner.info{background:rgba(53,208,184,.08);border-color:rgba(53,208,184,.35);color:#c9f7ee}
+.banner svg{width:20px;height:20px;flex:0 0 auto}
+.banner .btext{flex:1}
+.banner .bact{flex:0 0 auto}
+.banner.hide{display:none}
+
+/* severities */
+.sev-grid{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:680px){.sev-grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1100px){.sev-grid{grid-template-columns:repeat(5,1fr)}}
+.sev{background:#0d1524;border:1px solid var(--border-soft);border-radius:var(--radius);padding:16px 16px 14px;border-top:3px solid var(--sc)}
+.sev .sname{font-family:var(--font-m);font-weight:600;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--sc)}
+.sev .sdesc{color:var(--dim);font-size:12.5px;margin-top:6px;line-height:1.5}
+.sev .sval{font-family:var(--font-m);font-size:22px;font-weight:600;margin-top:10px}
+.sev .sval small{font-size:11px;color:var(--dim);font-weight:500;letter-spacing:1px;text-transform:uppercase}
+
+.chart-box{width:100%;height:260px}
+.chart-box.short{height:230px}
+
+/* spinner */
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* status pill in topbar */
+.pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-m);font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--border-soft);background:var(--surface);color:var(--dim)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+.pill.live{color:var(--ok);border-color:rgba(63,208,168,.35)}
+.pill.live .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(63,208,168,.18)}
+.pill.down{color:var(--err);border-color:rgba(240,74,91,.4)}
+.pill.down .dot{background:var(--err)}
+
+/* toast */
+.toasts{position:fixed;right:18px;bottom:18px;z-index:100;display:flex;flex-direction:column;gap:10px;max-width:360px}
+.toast{display:flex;gap:11px;align-items:flex-start;background:#13203a;border:1px solid var(--border);border-left:3px solid var(--t,#35d0b8);border-radius:10px;padding:12px 14px;font-size:13.5px;box-shadow:0 14px 34px -14px rgba(0,0,0,.6);animation:tin .25s ease}
+.toast.err{border-left-color:var(--err)}
+.toast.ok{border-left-color:var(--ok)}
+.toast.warn{border-left-color:var(--warn)}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* mobile nav */
+@media(max-width:860px){
+  .topbar{flex-wrap:wrap;gap:8px;padding:10px 12px;height:auto}
+  .topbar .conn{width:100%;justify-content:flex-start;order:3}
+  .field input{width:130px}
+  .field.key input{width:120px}
+  .shell{flex-direction:column}
+  .sidebar{position:sticky;top:0;height:auto;width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:8px 10px;gap:6px;border-right:0;border-bottom:1px solid var(--border-soft)}
+  .sidebar .sec{display:none}
+  .sidebar .foot{display:none}
+  .nav-item{white-space:nowrap;padding:9px 12px;font-size:13px}
+  .nav-item svg{display:none}
+  .nav-item .badge{margin-left:8px}
+  .main{padding:20px 16px 50px}
+  .view-head h1{font-size:22px}
+}
+@media(max-width:480px){
+  .field{flex:1 1 100%}
+  .field input{width:100%}
+  .metrics{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ===== topbar ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M5 14c2.5 0 2.5 1.8 5 1.8s2.5-1.8 5-1.8c1.5 0 2.5.6 3.2 1.5" stroke="#062019" stroke-width="1.9" stroke-linecap="round"/><path d="M5.5 8.5C7 7 9 6.3 12 6.3s5 1 6.5 2.2" stroke="#062019" stroke-width="1.9" stroke-linecap="round"/></svg></div>
+      <div>
+        <div class="name">Phish<b>Guard</b>_AI</div>
+        <div class="tag">Operator Console</div>
+      </div>
+    </div>
+    <div class="conn">
+      <div class="field"><label>API</label><input id="apiBase" type="text" value="http://127.0.0.1:8000" spellcheck="false" placeholder="http://127.0.0.1:8000"></div>
+      <div class="field key"><label>API&nbsp;Key</label><input id="apiKey" type="password" spellcheck="false" placeholder="optional"></div>
+      <button class="btn ghost" id="btnTest"><span>Test</span></button>
+      <span class="pill" id="connPill"><span class="dot"></span><span id="connText">checking</span></span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ===== sidebar ===== -->
+    <nav class="sidebar" id="nav">
+      <div class="sec">Console</div>
+      <div class="nav-item active" data-view="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 5 4-12 2 7h6"/></svg><span>Overview</span>
+      </div>
+      <div class="nav-item" data-view="scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7h4l5 9 4-6 2 3h3"/><circle cx="18.5" cy="17.5" r="2.6"/></svg><span>Scan Console</span>
+      </div>
+      <div class="nav-item" data-view="cases">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h4"/></svg><span>Cases</span><span class="badge" id="navCaseCount" style="display:none"></span>
+      </div>
+      <div class="nav-item" data-view="quarantine">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 3v3M15 3v3M9 11l2 2 4-4M9 17l6-6"/></svg><span>Quarantine</span>
+      </div>
+      <div class="nav-item" data-view="alerts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 15H4z"/><path d="M12 9v4M12 17v.5"/></svg><span>Alert Severities</span>
+      </div>
+      <div class="foot">FastAPI · api_gateway · v1.0</div>
+    </nav>
+
+    <!-- ===== main ===== -->
+    <main class="main" id="main">
+
+      <!-- ================================================================
+           VIEW: OVERVIEW
+           ================================================================ -->
+      <section class="view active" id="view-overview">
+        <div class="banner warn hide" id="ovBanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 15H4z"/><path d="M12 9v4M12 16v.2"/></svg><div class="btext" id="ovBannerText"></div></div>
+        <div class="view-head">
+          <div>
+            <div class="crumb">Detection Platform</div>
+            <h1>Security Overview</h1>
+            <p>Live posture across scans, incident cases, quarantine and alert severity thresholds.</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn ghost" id="ovRefresh"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>Refresh</button>
+          </div>
+        </div>
+        <div class="kpi-grid" id="ovKpis">
+          <div class="kpi" style="--k:#35d0b8"><div class="lab">Cases</div><div class="val" id="kCases">—</div><div class="delta"><span class="dot"></span>total in system</div></div>
+          <div class="kpi" style="--k:#5aa7ff"><div class="lab">Open Cases</div><div class="val" id="kOpen">—</div><div class="delta"><span class="dot"></span>awaiting action</div></div>
+          <div class="kpi" style="--k:#f4873b"><div class="lab">Quarantined</div><div class="val" id="kQuar">—</div><div class="delta"><span class="dot"></span>messages held</div></div>
+          <div class="kpi" style="--k:#f04a5b"><div class="lab">High + Critical</div><div class="val" id="kHigh">—</div><div class="delta"><span class="dot"></span>by case severity</div></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Case Severity Distribution</h3><p class="sub">Count of cases grouped by severity level.</p></div></div><div class="chart-box" id="ovSevChart"></div><div class="empty" id="ovSevEmpty"></div></div>
+        <div class="card"><div class="cardhead"><div><h3>Recent Activity</h3><p class="sub">Latest scans, cases and quarantined messages.</p></div></div>
+          <div id="ovActivity"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW: SCAN CONSOLE
+           ================================================================ -->
+      <section class="view" id="view-scan">
+        <div class="banner err hide" id="scanBanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v.2"/></svg><div class="btext" id="scanBannerText"></div><button class="btn ghost bact" id="scanBannerAct" style="display:none">Enter API key</button></div>
+        <div class="view-head">
+          <div>
+            <div class="crumb">Detection</div>
+            <h1>Scan Console</h1>
+            <p>Submit a URL or email payload to the engine and review the verdict, score and confidence.</p>
+          </div>
+        </div>
+        <div class="console-grid">
+          <div class="card">
+            <div class="cardhead"><div><h3>New Scan</h3><p class="sub">One target per request.</p></div></div>
+            <div class="form-row"><label>Target URL <span class="hint">— optional if email text is supplied</span></label><input class="input" id="scanUrl" spellcheck="false" placeholder="https://example.com/login" maxlength="8192"></div>
+            <div class="form-row"><label>Email Text <span class="hint">— raw message body</span></label><textarea class="textarea" id="scanEmail" placeholder="From: …\nSubject: …\nClick here to verify your account…" maxlength="1000000"></textarea></div>
+            <div class="form-row"><label>Filename <span class="hint">— optional</span></label><input class="input" id="scanFile" spellcheck="false" placeholder="invoice.pdf" maxlength="255"></div>
+            <div class="toggle-row">
+              <label class="toggle" id="tgSandbox"><input type="checkbox" id="chkSandbox"><span class="sw"></span>Enable sandbox</label>
+              <label class="toggle on" id="tgYara"><input type="checkbox" id="chkYara" checked><span class="sw"></span>Enable YARA</label>
+            </div>
+            <button class="btn primary" id="btnScan" style="width:100%;justify-content:center"><span class="spinner" id="scanSpin" style="display:none"></span><span id="scanBtnText">Run Scan</span></button>
+          </div>
+          <div class="card">
+            <div class="cardhead"><div><h3>Verdict</h3><p class="sub" id="scanVerdictMeta">No scan run yet.</p></div><span class="verdict-badge verdict-informational" id="scanVerdictBadge" style="display:none"><span class="dot"></span><span id="scanVerdictLabel">—</span></span></div>
+            <div class="verdict-grid" id="scanVerdictBody" style="display:none">
+              <div class="verdict-panel">
+                <div class="verdict-title">Overall Score</div>
+                <div class="gauge" id="scanGauge"></div>
+              </div>
+              <div>
+                <div class="metrics">
+                  <div class="metric"><div class="lab">Confidence</div><div class="val none" id="mConf">—</div></div>
+                  <div class="metric"><div class="lab">Execution Time</div><div class="val none" id="mTime">—</div></div>
+                  <div class="metric"><div class="lab">Scan Type</div><div class="val none" id="mType">—</div></div>
+                  <div class="metric"><div class="lab">State</div><div class="val none" id="mState">—</div></div>
+                </div>
+                <div class="spec-list">
+                  <div class="spec"><span class="k">Scan ID</span><span class="v mono" id="mScanId">—</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="empty" id="scanEmpty"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:18px"><div class="cardhead"><div><h3>Scan History</h3><p class="sub" id="scanHistMeta">Runs recorded in this session.</p></div><button class="btn ghost" id="btnClearHist">Clear</button></div>
+          <div class="tbl-wrap"><table class="tbl"><colgroup><col style="width:22%"><col style="width:18%"><col style="width:13%"><col style="width:15%"><col style="width:16%"><col style="width:16%"></colgroup><thead><tr><th>Target</th><th>Scan ID</th><th>Verdict</th><th>Score</th><th>Time</th><th>State</th></tr></thead><tbody id="scanHistBody"></tbody></table></div>
+          <div class="empty" id="scanHistEmpty"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW: CASES
+           ================================================================ -->
+      <section class="view" id="view-cases">
+        <div class="banner err hide" id="caseBanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v.2"/></svg><div class="btext" id="caseBannerText"></div></div>
+        <div class="view-head">
+          <div>
+            <div class="crumb">Incidents</div>
+            <h1>Cases</h1>
+            <p>Track phishing incidents through their lifecycle.</p>
+          </div>
+          <div class="head-actions"><button class="btn ghost" id="caseRefresh"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>Refresh</button></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>All Cases</h3><p class="sub">Fetched from <span class="mono" style="color:var(--muted)">GET /cases</span>.</p></div></div>
+          <div class="tbl-wrap"><table class="tbl"><colgroup><col style="width:24%"><col style="width:26%"><col style="width:12%"><col style="width:14%"><col style="width:12%"><col style="width:12%"></colgroup><thead><tr><th>Case</th><th>Description</th><th>Severity</th><th>Status</th><th>Assignee</th><th>Created</th></tr></thead><tbody id="caseBody"></tbody></table></div>
+          <div class="empty" id="caseEmpty"></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Create Case</h3><p class="sub">Open a new incident for triage.</p></div></div>
+          <div class="form-row"><label>Title <span class="req">*</span></label><input class="input" id="caseTitle" maxlength="256" placeholder="Suspicious domain campaign"></div>
+          <div class="form-row"><label>Description</label><textarea class="textarea" id="caseDesc" maxlength="16384" placeholder="Observed …"></textarea></div>
+          <div class="form-row" style="flex-direction:row;flex-wrap:wrap;gap:10px">
+            <div style="flex:1;min-width:140px"><label>Severity</label><select class="select" id="caseSev"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="critical">critical</option><option value="informational">informational</option></select></div>
+            <div style="flex:1;min-width:140px"><label>Assignee</label><input class="input" id="caseAssign" maxlength="128" placeholder="analyst@team"></div>
+          </div>
+          <button class="btn primary" id="btnCase" style="min-width:160px"><span class="spinner" id="caseSpin" style="display:none"></span><span id="caseBtnText">Create Case</span></button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW: QUARANTINE
+           ================================================================ -->
+      <section class="view" id="view-quarantine">
+        <div class="banner err hide" id="quarBanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v.2"/></svg><div class="btext" id="quarBannerText"></div></div>
+        <div class="view-head">
+          <div>
+            <div class="crumb">Mail Defense</div>
+            <h1>Quarantine Queue</h1>
+            <p>Messages held by risk score, ready for review.</p>
+          </div>
+          <div class="head-actions"><button class="btn ghost" id="quarRefresh"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>Refresh</button></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Queued Messages</h3><p class="sub">Fetched from <span class="mono" style="color:var(--muted)">GET /quarantine</span>.</p></div></div>
+          <div class="tbl-wrap"><table class="tbl"><colgroup><col style="width:20%"><col style="width:20%"><col style="width:14%"><col style="width:14%"><col style="width:20%"><col style="width:12%"></colgroup><thead><tr><th>Quarantine ID</th><th>Message ID</th><th>Status</th><th>Risk Score</th><th>Reasons</th><th>Created</th></tr></thead><tbody id="quarBody"></tbody></table></div>
+          <div class="empty" id="quarEmpty"></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Quarantine Message</h3><p class="sub">Flag an email for the queue.</p></div></div>
+          <div class="form-row"><label>Message ID <span class="req">*</span></label><input class="input" id="quarMid" maxlength="128" placeholder="msg_20261021_abcd"></div>
+          <div class="form-row"><label>Message Body</label><textarea class="textarea" id="quarBodyText" maxlength="1000000" placeholder="Raw message text…"></textarea></div>
+          <div class="form-row" style="flex-direction:row;align-items:center;gap:12px"><label style="margin:0">Risk Score (0–1)</label><input class="input" id="quarRisk" type="number" step="0.01" min="0" max="1" value="0.85" style="width:120px"></div>
+          <button class="btn primary" id="btnQuar" style="min-width:170px"><span class="spinner" id="quarSpin" style="display:none"></span><span id="quarBtnText">Add to Quarantine</span></button>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           VIEW: ALERTS
+           ================================================================ -->
+      <section class="view" id="view-alerts">
+        <div class="banner err hide" id="alertBanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v.2"/></svg><div class="btext" id="alertBannerText"></div></div>
+        <div class="view-head">
+          <div>
+            <div class="crumb">Policy</div>
+            <h1>Alert Severities</h1>
+            <p>The severity scale recognized by the alerting engine.</p>
+          </div>
+          <div class="head-actions"><button class="btn ghost" id="alertRefresh"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>Refresh</button></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Severity Scale</h3><p class="sub" id="alertMeta">Loaded from <span class="mono" style="color:var(--muted)">GET /alerts/severities</span>.</p></div></div>
+          <div class="sev-grid" id="sevGrid"></div>
+          <div class="empty" id="sevEmpty"></div>
+        </div>
+        <div class="card"><div class="cardhead"><div><h3>Thresholds</h3><p class="sub">How the overall score maps to a verdict.</p></div></div>
+          <div class="tbl-wrap"><table class="tbl"><colgroup><col style="width:30%"><col style="width:24%"><col style="width:46%"></colgroup><thead><tr><th>Verdict</th><th>Score Range</th><th>Recommended Response</th></tr></thead><tbody>
+            <tr><td><span class="badge verdict-informational"><span class="dot"></span>INFORMATIONAL</span></td><td class="mono">0 – 20</td><td class="ttl">Log &amp; archive; no action.</td></tr>
+            <tr><td><span class="badge verdict-low"><span class="dot"></span>LOW</span></td><td class="mono">21 – 40</td><td class="ttl">Monitor; low-priority triage.</td></tr>
+            <tr><td><span class="badge verdict-medium"><span class="dot"></span>MEDIUM</span></td><td class="mono">41 – 60</td><td class="ttl">Open a case; review indicators.</td></tr>
+            <tr><td><span class="badge verdict-high"><span class="dot"></span>HIGH</span></td><td class="mono">61 – 80</td><td class="ttl">Quarantine target; escalate to analyst.</td></tr>
+            <tr><td><span class="badge verdict-critical"><span class="dot"></span>CRITICAL</span></td><td class="mono">81 – 100</td><td class="ttl">Immediate block; notify incident response.</td></tr>
+          </tbody></table></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+<script>
+/* ================================================================
+   PhishGuard_AI · Operator Console
+   Single-file dashboard wired to api_gateway (FastAPI).
+   ================================================================ */
+(function () {
+  'use strict';
+
+  /* ---------- tiny dom helpers ---------- */
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function scorePct(v) {
+    if (v === null || v === undefined || isNaN(v)) return null;
+    return Math.round(v * 1000) / 1000;
+  }
+
+  function fmtMs(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return (Math.round(v * 1000) / 1000) + ' ms';
+  }
+
+  function pct100(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return Math.round(scorePct(v) * 100) + '%';
+  }
+
+  function toast(msg, type) {
+    var box = $('toasts');
+    // Avoid stacking the same message from repeated clicks/attempts.
+    var existing = box.querySelector('.toast[data-msg="' + esc(msg).replace(/"/g, '&quot;') + '"]');
+    if (existing) return;
+    var t = document.createElement('div');
+    t.className = 'toast ' + (type || '');
+    t.setAttribute('data-msg', esc(msg).replace(/"/g, '&quot;'));
+    t.textContent = msg;
+    box.appendChild(t);
+    setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 3600);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 3950);
+  }
+
+  /* ---------- connection / api layer ---------- */
+  // When the dashboard is served by the API itself, talk to the same origin
+  // (no CORS, no manual base URL). When opened as a local file, fall back to
+  // the default localhost API.
+  var pageOrigin = (location.protocol === 'http:' || location.protocol === 'https:')
+    ? location.origin
+    : 'http://127.0.0.1:8000';
+  var conn = {
+    base: localStorage.getItem('pg_base') || pageOrigin,
+    key: localStorage.getItem('pg_key') || ''
+  };
+
+  function setKey() {
+    conn.base = ($('apiBase').value || pageOrigin).replace(/\/+$/, '');
+    conn.key = $('apiKey').value.trim();
+    localStorage.setItem('pg_base', conn.base);
+    if (conn.key) localStorage.setItem('pg_key', conn.key);
+    else localStorage.removeItem('pg_key');
+  }
+
+  function api(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (conn.key) headers['X-API-Key'] = conn.key;
+    return fetch(conn.base + path, {
+      method: method,
+      headers: headers,
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (res.status === 401) {
+          var e = new Error('Unauthorized');
+          e.unauthorized = true;
+          throw e;
+        }
+        if (!res.ok) {
+          var e2 = new Error((data && data.detail) ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : ('HTTP ' + res.status));
+          e2.status = res.status;
+          throw e2;
+        }
+        return data;
+      });
+    });
+  }
+
+  function ping() {
+    return fetch(conn.base + '/health').then(function (r) {
+      if (r.status === 404 || r.status === 307) { return fetch(conn.base + '/'); }
+      return r;
+    }).then(function (r) { return r.status >= 200 && r.status < 500; });
+  }
+
+  function setConnPill(live, text) {
+    var p = $('connPill');
+    p.classList.remove('live', 'down');
+    p.classList.add(live ? 'live' : 'down');
+    $('connText').textContent = text;
+  }
+
+  function testConn(silent) {
+    setConnPill(false, 'testing…');
+    return ping().then(function (ok) {
+      if (!ok) {
+        setConnPill(false, 'offline');
+        if (!silent) toast('API unreachable: ' + conn.base, 'err');
+        return false;
+      }
+      if (conn.key) {
+        // Verify the key against an auth-protected endpoint, so the pill
+        // reflects real readiness, not just a reachable health probe.
+        return api('GET', '/cases').then(function () {
+          setConnPill(true, 'authenticated');
+          if (!silent) toast('Connected and authenticated.', 'ok');
+          return true;
+        }).catch(function (e) {
+          if (e && e.unauthorized) {
+            setConnPill(false, 'key rejected');
+            if (!silent) toast('Server online, but the API key is missing or wrong.', 'warn');
+            return false;
+          }
+          setConnPill(true, 'online');
+          if (!silent) toast('Connected to ' + conn.base, 'ok');
+          return true;
+        });
+      }
+      setConnPill(true, 'online');
+      if (!silent) toast('Connected to ' + conn.base, 'ok');
+      return true;
+    }).catch(function () {
+      setConnPill(false, 'offline');
+      if (!silent) toast('API unreachable: ' + conn.base, 'err');
+      return false;
+    });
+  }
+
+  /* ---------- routing ---------- */
+  var VIEWS = ['overview', 'scan', 'cases', 'quarantine', 'alerts'];
+  var loaders = {};
+  var currentView = null;
+
+  function showView(name) {
+    if (VIEWS.indexOf(name) < 0) name = 'overview';
+    document.querySelectorAll('.nav-item').forEach(function (n) {
+      n.classList.toggle('active', n.getAttribute('data-view') === name);
+    });
+    document.querySelectorAll('.main > .view').forEach(function (v) {
+      v.classList.remove('active');
+    });
+    $('view-' + name).classList.add('active');
+    currentView = name;
+    if (loaders[name]) loaders[name]();
+    scheduleChartResize();
+  }
+
+  document.querySelectorAll('.nav-item').forEach(function (n) {
+    n.addEventListener('click', function () {
+      var v = n.getAttribute('data-view');
+      if (window.location.hash !== '#' + v) window.location.hash = v;
+      showView(v);
+    });
+  });
+  window.addEventListener('hashchange', function () {
+    showView((window.location.hash || '#overview').replace('#', ''));
+  });
+
+  /* ---------- charts ---------- */
+  var charts = {};
+
+  function echartsOf(elId) {
+    var el = $(elId);
+    if (!el) return null;
+    var inst = charts[elId];
+    if (!inst) { inst = echarts.init(el, null, { renderer: 'canvas' }); charts[elId] = inst; }
+    inst.resize();
+    return inst;
+  }
+
+  function scheduleChartResize() {
+    setTimeout(function () {
+      Object.keys(charts).forEach(function (k) {
+        var el = $(k);
+        if (el && el.offsetParent) charts[k].resize();
+      });
+    }, 60);
+  }
+
+  var SEV_COLORS = {
+    informational: '#7c8ca5', low: '#35d0b8', medium: '#f4b556',
+    high: '#f4873b', critical: '#f04a5b'
+  };
+  var SEV_ORDER = ['critical', 'high', 'medium', 'low', 'informational'];
+
+  function verdictClass(v) {
+    v = String(v || '').toLowerCase();
+    return 'verdict-' + (SEV_COLORS[v] ? v : 'informational');
+  }
+  function verdictColor(v) {
+    v = String(v || '').toLowerCase();
+    return SEV_COLORS[v] || '#7c8ca5';
+  }
+  function statusClass(s) {
+    return 'st-' + String(s || '').toLowerCase();
+  }
+
+  /* ---------- toast + shared state ---------- */
+  var scans = [];
+  var scanGaugeShown = false;
+
+  /* ================================================================
+     VIEW: OVERVIEW
+     ================================================================ */
+  loaders.overview = function () {
+    var chain = Promise.all([
+      api('GET', '/cases').catch(function (e) { return e && e.unauthorized ? 'AUTH' : []; }),
+      api('GET', '/quarantine').catch(function (e) { return e && e.unauthorized ? 'AUTH' : []; }),
+      api('GET', '/alerts/severities').catch(function () { return {}; })
+    ]).then(function (r) {
+      var cases = r[0], quar = r[1], sevMap = r[2];
+      if (cases === 'AUTH' || quar === 'AUTH') {
+        $('ovBanner').classList.remove('hide');
+        $('ovBannerText').textContent = 'API key required to read cases and quarantine. Add a key in the connection bar above.';
+      } else {
+        $('ovBanner').classList.add('hide');
+      }
+      if (Array.isArray(cases)) renderOverviewKpis(cases, quar, sevMap);
+      else renderOverviewKpis([], [], sevMap);
+    });
+  };
+
+  function renderOverviewKpis(cases, quar, sevMap) {
+    var list = Array.isArray(cases) ? cases : [];
+    var qlist = Array.isArray(quar) ? quar : [];
+    var total = list.length;
+    var open = list.filter(function (c) { return String(c.status || '').toLowerCase() === 'open'; }).length;
+    var high = list.filter(function (c) { var s = String(c.severity || '').toLowerCase(); return s === 'high' || s === 'critical'; }).length;
+    $('kCases').textContent = total;
+    $('kOpen').textContent = open;
+    $('kQuar').textContent = qlist.length;
+    $('kHigh').textContent = high;
+
+    renderSevChart(list);
+    renderActivity(list, qlist);
+  }
+
+  function renderSevChart(cases) {
+    var counts = {};
+    SEV_ORDER.forEach(function (s) { counts[s] = 0; });
+    cases.forEach(function (c) {
+      var s = String(c.severity || '').toLowerCase();
+      if (counts[s] !== undefined) counts[s] += 1; else counts.informational += 1;
+    });
+    var has = SEV_ORDER.some(function (s) { return counts[s] > 0; });
+    $('ovSevEmpty').classList.toggle('show', !has);
+    if (!has) { $('ovSevEmpty').innerHTML = '<div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg></div><h4>No cases yet</h4><p>Open a case from the Cases view to populate this chart.</p>'; }
+    var ordered = SEV_ORDER.slice().reverse();
+    var chart = echartsOf('ovSevChart');
+    if (!chart) return;
+    chart.setOption({
+      grid: { left: 12, right: 30, top: 14, bottom: 8, containLabel: true },
+      xAxis: { type: 'category', data: ordered.map(function (s) { return s.toUpperCase(); }), axisTick: { show: false }, axisLine: { lineStyle: { color: '#223149' } }, axisLabel: { color: '#8ca2be', fontFamily: 'IBM Plex Mono', fontSize: 12 } },
+      yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: 'rgba(34,49,71,.4)' } }, axisLabel: { color: '#5a6f8e', fontFamily: 'IBM Plex Mono', fontSize: 11 } },
+      series: [{
+        type: 'bar',
+        barWidth: '42%',
+        data: ordered.map(function (s) {
+          return { value: counts[s], itemStyle: { color: SEV_COLORS[s], borderRadius: [5, 5, 0, 0] } };
+        }),
+        label: { show: true, position: 'top', color: '#e6edf7', fontFamily: 'IBM Plex Mono', fontSize: 12 }
+      }],
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#13203a', borderColor: '#223149', textStyle: { color: '#e6edf7', fontFamily: 'IBM Plex Mono', fontSize: 12 } }
+    }, true);
+  }
+
+  function renderActivity(cases, quar) {
+    var rows = [];
+    cases.forEach(function (c) {
+      rows.push({ kind: 'case', t: c.created_utc, text: (c.title || 'Untitled case'), sub: 'Case ' + (c.case_id || '') + ' · ' + (c.severity || '—'), color: verdictColor(c.severity) });
+    });
+    quar.forEach(function (q) {
+      rows.push({ kind: 'quar', t: q.created_utc, text: (q.message_id || 'Message'), sub: 'Quarantined · risk ' + (q.risk_score !== null && q.risk_score !== undefined ? (Math.round(q.risk_score * 100) + '%') : '—'), color: '#f4873b' });
+    });
+    scans.forEach(function (s) {
+      rows.push({ kind: 'scan', t: s.when, text: (s.target || s.type || 'Scan'), sub: (s.scan_id || '') + ' · ' + (s.verdict || '—'), color: verdictColor(s.verdict) });
+    });
+    rows.sort(function (a, b) { return (b.t || '').toString().localeCompare((a.t || '').toString()); });
+    rows = rows.slice(0, 8);
+    var wrap = $('ovActivity');
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty show"><div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 15H4z"/><path d="M12 9v4M12 17v.2"/></svg></div><h4>Nothing yet</h4><p>Run a scan, open a case or quarantine a message to see activity here.</p></div>';
+      return;
+    }
+    var html = '<div class="tbl-wrap"><table class="tbl"><colgroup><col style="width:56%"><col style="width:26%"><col style="width:18%"></colgroup><thead><tr><th>Item</th><th>Reference</th><th>When</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      html += '<tr><td><span class="ttl">' + esc(r.text) + '</span><span class="subc">' + esc(r.sub) + '</span></td>' +
+        '<td><span class="mono" style="color:' + r.color + '">' + esc(String(r.kind).toUpperCase()) + '</span></td>' +
+        '<td class="mono" style="color:var(--dim)">' + esc(fmtTime(r.t)) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    wrap.innerHTML = html;
+  }
+
+  /* ================================================================
+     VIEW: SCAN CONSOLE
+     ================================================================ */
+  function setToggle(tg, on) {
+    tg.classList.toggle('on', on);
+    tg.querySelector('input').checked = on;
+  }
+  ['tgSandbox', 'tgYara'].forEach(function (id) {
+    $(id).addEventListener('click', function () {
+      var inp = $(id === 'tgSandbox' ? 'chkSandbox' : 'chkYara');
+      setToggle($(id), !inp.checked);
+    });
+  });
+
+  function showScanBanner(msg, act) {
+    var b = $('scanBanner');
+    b.classList.remove('hide');
+    $('scanBannerText').textContent = msg;
+    var a = $('scanBannerAct');
+    a.style.display = act ? 'inline-flex' : 'none';
+    if (act) { a.onclick = function () { var k = $('apiKey'); k.focus(); k.scrollIntoView({ block: 'center', behavior: 'smooth' }); }; }
+  }
+
+  function renderScanHistory() {
+    var body = $('scanHistBody');
+    var empty = $('scanHistEmpty');
+    if (!scans.length) {
+      body.innerHTML = '';
+      empty.classList.add('show');
+      empty.innerHTML = '<div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h4l5 9 4-6 2 3h3"/><circle cx="18.5" cy="17.5" r="2.6"/></svg></div><h4>No scans yet</h4><p>Run a scan above; results appear here.</p>';
+      return;
+    }
+    empty.classList.remove('show');
+    body.innerHTML = scans.slice().reverse().map(function (s) {
+      return '<tr><td class="ttl">' + esc(s.target || s.type || 'email') + '</td>' +
+        '<td class="mono">' + esc(s.scan_id || '—') + '</td>' +
+        '<td><span class="badge ' + verdictClass(s.verdict) + '"><span class="dot"></span>' + esc(String(s.verdict || '—').toUpperCase()) + '</span></td>' +
+        '<td class="mono">' + esc(pct100(s.score)) + '</td>' +
+        '<td class="mono">' + esc(fmtMs(s.time)) + '</td>' +
+        '<td><span class="badge ' + statusClass(s.state) + '"><span class="dot"></span>' + esc(s.state || '—') + '</span></td></tr>';
+    }).join('');
+  }
+
+  loaders.scan = function () {
+    renderScanHistory();
+  };
+
+  function runScan() {
+    var url = $('scanUrl').value.trim();
+    var email = $('scanEmail').value;
+    var file = $('scanFile').value.trim();
+    if (!url && !email) { toast('Provide a target URL or email text.', 'warn'); return; }
+    var payload = { target_url: url || undefined, email_text: email || undefined, filename: file || undefined, enable_sandbox: $('chkSandbox').checked, enable_yara: $('chkYara').checked };
+    $('scanSpin').style.display = 'inline-block';
+    $('scanBtnText').textContent = 'Scanning…';
+    $('btnScan').disabled = true;
+    showScanBanner('');
+    $('scanBanner').classList.add('hide');
+    api('POST', '/scan', payload).then(function (res) {
+      scans.push({
+        scan_id: res.scan_id, verdict: res.verdict, score: res.overall_score,
+        confidence: res.confidence_score, time: res.total_execution_time_ms,
+        state: res.execution_state, type: res.scan_type, target: url || ('email ' + (file || '')),
+        when: new Date().toISOString()
+      });
+      renderVerdict(res);
+      renderScanHistory();
+      $('scanHistMeta').textContent = 'Runs recorded in this session (' + scans.length + ').';
+      toast('Scan complete: ' + String(res.verdict).toUpperCase(), 'ok');
+    }).catch(function (e) {
+      if (e && e.unauthorized) {
+        showScanBanner('This endpoint requires an API key. Add one in the connection bar, then scan again.', true);
+        toast('Unauthorized — API key required.', 'err');
+      } else {
+        showScanBanner('Scan failed: ' + (e.message || 'request error'), true);
+        toast('Scan failed.', 'err');
+      }
+    }).finally(function () {
+      $('scanSpin').style.display = 'none';
+      $('scanBtnText').textContent = 'Run Scan';
+      $('btnScan').disabled = false;
+    });
+  }
+
+  function renderVerdict(res) {
+    $('scanVerdictBody').style.display = 'grid';
+    $('scanEmpty').classList.remove('show');
+    $('scanVerdictMeta').textContent = 'From scan ' + (res.scan_id || '—') + ' · ' + (res.scan_type || '—');
+    var vb = $('scanVerdictBadge');
+    vb.className = 'verdict-badge ' + verdictClass(res.verdict);
+    vb.style.display = 'inline-flex';
+    $('scanVerdictLabel').textContent = String(res.verdict || '—').toUpperCase();
+    var score = scorePct(res.overall_score);
+    $('mConf').textContent = pct100(res.confidence_score);
+    $('mConf').classList.toggle('none', scorePct(res.confidence_score) === null);
+    $('mTime').textContent = fmtMs(res.total_execution_time_ms);
+    $('mTime').classList.toggle('none', !(res.total_execution_time_ms !== null && res.total_execution_time_ms !== undefined));
+    $('mType').textContent = res.scan_type || '—';
+    $('mType').classList.toggle('none', !res.scan_type);
+    $('mState').textContent = res.execution_state || '—';
+    $('mState').classList.toggle('none', !res.execution_state);
+    $('mScanId').textContent = res.scan_id || '—';
+    drawGauge(score);
+  }
+
+  function drawGauge(score) {
+    var chart = echartsOf('scanGauge');
+    if (!chart) return;
+    var has = score !== null;
+    var value = has ? score : 0;
+    chart.setOption({
+      series: [{
+        type: 'gauge',
+        startAngle: 210, endAngle: -30, min: 0, max: 100,
+        radius: '96%', center: ['50%', '56%'],
+        pointer: { show: has, length: '58%', width: 5, itemStyle: { color: '#e6edf7' } },
+        progress: { show: has, overlap: false, roundCap: true, clip: false, width: 14, itemStyle: { color: score !== null ? (score >= 80 ? SEV_COLORS.critical : score >= 60 ? SEV_COLORS.high : score >= 40 ? SEV_COLORS.medium : score >= 20 ? SEV_COLORS.low : SEV_COLORS.informational) : SEV_COLORS.informational } },
+        axisLine: { lineStyle: { width: 14, color: [[0.2, '#2a3852'], [0.4, '#2a3852'], [0.6, '#2a3852'], [0.8, '#2a3852'], [1, '#2a3852']] } },
+        axisTick: { show: false }, splitLine: { show: false },
+        axisLabel: { show: has, distance: 22, color: '#5a6f8e', fontFamily: 'IBM Plex Mono', fontSize: 10 },
+        anchor: { show: has, size: 12, itemStyle: { color: '#e6edf7' } },
+        title: { show: has, offsetCenter: [0, '78%'], fontSize: 11, color: '#8ca2be', fontFamily: 'IBM Plex Mono' },
+        detail: {
+          formatter: has ? function (v) { return Math.round(v); } : '—',
+          offsetCenter: [0, '8%'], valueAnimation: true,
+          fontSize: 40, fontWeight: 700, color: '#e6edf7', fontFamily: 'IBM Plex Mono'
+        },
+        data: [{ value: value, name: 'risk score' }]
+      }]
+    }, true);
+    if (!has) {
+      var d = chart.getOption().series[0].detail;
+      d.formatter = '—';
+    }
+  }
+
+  $('btnScan').addEventListener('click', runScan);
+  $('btnClearHist').addEventListener('click', function () {
+    if (scans.length && !confirm('Clear the in-session scan history?')) return;
+    scans = [];
+    renderScanHistory();
+    $('scanHistMeta').textContent = 'Runs recorded in this session.';
+  });
+
+  /* ================================================================
+     VIEW: CASES
+     ================================================================ */
+  loaders.cases = function () { listCases(); };
+
+  function showCaseBanner(msg) {
+    var b = $('caseBanner');
+    if (!msg) { b.classList.add('hide'); return; }
+    b.classList.remove('hide');
+    $('caseBannerText').textContent = msg;
+  }
+
+  function listCases() {
+    api('GET', '/cases').then(function (list) {
+      var arr = Array.isArray(list) ? list : [];
+      showCaseBanner('');
+      $('navCaseCount').style.display = arr.length ? 'inline' : 'none';
+      $('navCaseCount').textContent = arr.length;
+      renderCases(arr);
+    }).catch(function (e) {
+      showCaseBanner(e && e.unauthorized ? 'API key required to read cases. Add one in the connection bar.' : 'Could not load cases: ' + (e.message || 'request error'));
+      renderCases([]);
+    });
+  }
+
+  function renderCases(list) {
+    var body = $('caseBody');
+    var empty = $('caseEmpty');
+    if (!list.length) {
+      body.innerHTML = '';
+      empty.classList.add('show');
+      empty.innerHTML = '<div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h4"/></svg></div><h4>No cases</h4><p>Open an incident from the form below, then this table fills in.</p>';
+      return;
+    }
+    empty.classList.remove('show');
+    body.innerHTML = list.map(function (c) {
+      return '<tr><td><span class="ttl">' + esc(c.title || 'Untitled') + '</span><span class="subc">' + esc(c.case_id || '') + '</span></td>' +
+        '<td style="white-space:normal">' + esc((c.description || '').slice(0, 90)) + '</td>' +
+        '<td><span class="badge ' + verdictClass(c.severity) + '"><span class="dot"></span>' + esc(String(c.severity || '—')) + '</span></td>' +
+        '<td><span class="badge ' + statusClass(c.status) + '"><span class="dot"></span>' + esc(String(c.status || '—').replace('_', ' ')) + '</span></td>' +
+        '<td class="mono">' + esc(c.assignee || '—') + '</td>' +
+        '<td class="mono" style="color:var(--dim)">' + esc(fmtTime(c.created_utc)) + '</td></tr>';
+    }).join('');
+  }
+
+  $('btnCase').addEventListener('click', function () {
+    var title = $('caseTitle').value.trim();
+    if (!title) { toast('Title is required.', 'warn'); return; }
+    var payload = { title: title, description: $('caseDesc').value, severity: $('caseSev').value, assignee: $('caseAssign').value.trim() || undefined };
+    $('caseSpin').style.display = 'inline-block';
+    $('caseBtnText').textContent = 'Creating…';
+    $('btnCase').disabled = true;
+    api('POST', '/cases', payload).then(function (c) {
+      toast('Case created.', 'ok');
+      $('caseTitle').value = ''; $('caseDesc').value = '';
+      listCases();
+      if (currentView === 'overview') loaders.overview();
+    }).catch(function (e) {
+      toast('Create failed: ' + (e && e.unauthorized ? 'API key required.' : (e.message || 'request error')), 'err');
+      if (e && e.unauthorized) showCaseBanner('API key required to create cases. Add one in the connection bar.');
+    }).finally(function () {
+      $('caseSpin').style.display = 'none';
+      $('caseBtnText').textContent = 'Create Case';
+      $('btnCase').disabled = false;
+    });
+  });
+  $('caseRefresh').addEventListener('click', listCases);
+
+  /* ================================================================
+     VIEW: QUARANTINE
+     ================================================================ */
+  loaders.quarantine = function () { listQuarantine(); };
+
+  function showQuarBanner(msg) {
+    var b = $('quarBanner');
+    if (!msg) { b.classList.add('hide'); return; }
+    b.classList.remove('hide');
+    $('quarBannerText').textContent = msg;
+  }
+
+  function listQuarantine() {
+    api('GET', '/quarantine').then(function (list) {
+      showQuarBanner('');
+      renderQuarantine(Array.isArray(list) ? list : []);
+    }).catch(function (e) {
+      showQuarBanner(e && e.unauthorized ? 'API key required to read the quarantine queue. Add one in the connection bar.' : 'Could not load quarantine: ' + (e.message || 'request error'));
+      renderQuarantine([]);
+    });
+  }
+
+  function riskClass(v) {
+    if (v === null || v === undefined) return 'verdict-informational';
+    if (v >= 0.8) return 'verdict-critical';
+    if (v >= 0.6) return 'verdict-high';
+    if (v >= 0.4) return 'verdict-medium';
+    if (v >= 0.2) return 'verdict-low';
+    return 'verdict-informational';
+  }
+
+  function renderQuarantine(list) {
+    var body = $('quarBody');
+    var empty = $('quarEmpty');
+    if (!list.length) {
+      body.innerHTML = '';
+      empty.classList.add('show');
+      empty.innerHTML = '<div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 11l2 2 4-4"/></svg></div><h4>Queue empty</h4><p>Quarantine a message below to see it here.</p>';
+      return;
+    }
+    empty.classList.remove('show');
+    body.innerHTML = list.map(function (q) {
+      var reasons = Array.isArray(q.reasons) ? q.reasons.join(' · ') : (q.reasons || '—');
+      return '<tr><td class="mono">' + esc(q.quarantine_id || '—') + '</td>' +
+        '<td class="mono">' + esc(q.message_id || '—') + '</td>' +
+        '<td><span class="badge ' + statusClass(q.status) + '"><span class="dot"></span>' + esc(String(q.status || '—')) + '</span></td>' +
+        '<td><span class="badge ' + riskClass(q.risk_score) + '"><span class="dot"></span>' + (q.risk_score !== null && q.risk_score !== undefined ? (Math.round(q.risk_score * 100) + '%') : '—') + '</span></td>' +
+        '<td style="white-space:normal;color:var(--muted)">' + esc(reasons) + '</td>' +
+        '<td class="mono" style="color:var(--dim)">' + esc(fmtTime(q.created_utc)) + '</td></tr>';
+    }).join('');
+  }
+
+  $('btnQuar').addEventListener('click', function () {
+    var mid = $('quarMid').value.trim();
+    if (!mid) { toast('Message ID is required.', 'warn'); return; }
+    var risk = parseFloat($('quarRisk').value);
+    if (isNaN(risk)) risk = 0.85;
+    risk = Math.max(0, Math.min(1, risk));
+    var payload = { message_id: mid, body: $('quarBodyText').value || ' ', risk_score: risk };
+    $('quarSpin').style.display = 'inline-block';
+    $('quarBtnText').textContent = 'Adding…';
+    $('btnQuar').disabled = true;
+    api('POST', '/quarantine', payload).then(function () {
+      toast('Message quarantined.', 'ok');
+      $('quarMid').value = ''; $('quarBodyText').value = '';
+      listQuarantine();
+      if (currentView === 'overview') loaders.overview();
+    }).catch(function (e) {
+      toast('Failed: ' + (e && e.unauthorized ? 'API key required.' : (e.message || 'request error')), 'err');
+      if (e && e.unauthorized) showQuarBanner('API key required to quarantine. Add one in the connection bar.');
+    }).finally(function () {
+      $('quarSpin').style.display = 'none';
+      $('quarBtnText').textContent = 'Add to Quarantine';
+      $('btnQuar').disabled = false;
+    });
+  });
+  $('quarRefresh').addEventListener('click', listQuarantine);
+
+  /* ================================================================
+     VIEW: ALERTS
+     ================================================================ */
+  loaders.alerts = function () { loadSeverities(); };
+
+  var SEV_INFO = {
+    informational: { desc: 'No threat indicators found. Safe to process.', key: '0 – 20' },
+    low: { desc: 'Minor anomalies. Monitor without action.', key: '21 – 40' },
+    medium: { desc: 'Notable indicators. Recommend investigation.', key: '41 – 60' },
+    high: { desc: 'Strong indicators. Escalate for analysis.', key: '61 – 80' },
+    critical: { desc: 'Confirmed threat. Block immediately.', key: '81 – 100' }
+  };
+
+  function showAlertBanner(msg) {
+    var b = $('alertBanner');
+    if (!msg) { b.classList.add('hide'); return; }
+    b.classList.remove('hide');
+    $('alertBannerText').textContent = msg;
+  }
+
+  function loadSeverities() {
+    api('GET', '/alerts/severities').then(function (map) {
+      showAlertBanner('');
+      renderSeverities(map);
+    }).catch(function (e) {
+      showAlertBanner('Could not load severities: ' + (e.message || 'request error'));
+      renderSeverities({});
+    });
+  }
+
+  function renderSeverities(map) {
+    var known = ['informational', 'low', 'medium', 'high', 'critical'];
+    var present = known.filter(function (k) { return map && map[k] !== undefined; });
+    var grid = $('sevGrid');
+    var empty = $('sevEmpty');
+    if (!present.length) {
+      grid.innerHTML = '';
+      empty.classList.add('show');
+      empty.innerHTML = '<div class="eico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 15H4z"/><path d="M12 9v4M12 17v.2"/></svg></div><h4>No severity map returned</h4><p>The endpoint is reachable but returned no severity values.</p>';
+      return;
+    }
+    empty.classList.remove('show');
+    grid.innerHTML = present.map(function (k) {
+      var info = SEV_INFO[k] || { desc: 'Severity level.', key: '' };
+      return '<div class="sev" style="--sc:' + verdictColor(k) + '">' +
+        '<div class="sname">' + esc(k) + '</div>' +
+        '<div class="sdesc">' + esc(info.desc) + '</div>' +
+        '<div class="sval">' + esc(info.key) + '<small>score range</small></div></div>';
+    }).join('');
+  }
+  $('alertRefresh').addEventListener('click', loadSeverities);
+  $('ovRefresh').addEventListener('click', function () { loaders.overview(); });
+
+  /* ---------- connection UI ---------- */
+  $('btnTest').addEventListener('click', function () { setKey(); testConn(false); });
+  $('apiBase').addEventListener('keydown', function (e) { if (e.key === 'Enter') { setKey(); testConn(true); } });
+  $('apiKey').addEventListener('keydown', function (e) { if (e.key === 'Enter') { setKey(); testConn(true); } });
+
+  /* ---------- boot ---------- */
+  $('apiBase').value = conn.base;
+  $('apiKey').value = conn.key;
+  testConn(true);
+  if (!window.location.hash) window.location.hash = 'overview';
+  showView((window.location.hash || '#overview').replace('#', ''));
+
+  window.addEventListener('resize', scheduleChartResize);
+})();
+</script>
+</body>
+</html>

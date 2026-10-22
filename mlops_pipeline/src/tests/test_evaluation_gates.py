@@ -50,12 +50,13 @@ from tests import (
     assert_metrics_within_bounds,
 )
 
-from src.stages.03_evaluate import (
-    compute_classification_metrics,
-    evaluate_slice_performance,
-    compare_candidate_vs_champion,
-    evaluate_candidate_model_stage,
-)
+import importlib
+
+_evaluate_module = importlib.import_module("src.stages.03_evaluate")
+compute_classification_metrics = _evaluate_module.compute_classification_metrics
+evaluate_slice_performance = _evaluate_module.evaluate_slice_performance
+compare_candidate_vs_champion = _evaluate_module.compare_candidate_vs_champion
+evaluate_candidate_model_stage = _evaluate_module.evaluate_candidate_model_stage
 
 
 # ==============================================================================

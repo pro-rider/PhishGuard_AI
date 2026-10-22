@@ -1,4 +1,4 @@
-    """
+"""
 PhishGuard_AI - Production Detection Engine Orchestrator
 
 Central detection pipeline coordinator managing parallel, dependency-aware, 
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import logging
 import math
 import os
 import re
@@ -58,6 +59,8 @@ from security.audit_log import (
     audit_logger,
 )
 from security.ssrf_guard import ssrf_guard
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONSTANTS & BOUNDS

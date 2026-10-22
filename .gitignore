@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Keep the example, ignore real env files
+!.env.example
+
+# Runtime / generated artifacts
+storage/objects/
+_shots/
+*.log
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ML / MLOps run artifacts (models & experiment outputs)
+mlruns/
+.mlflow/
+mlops_pipeline/artifacts/
+*.joblib
+
+# IDE & OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

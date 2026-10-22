@@ -1,0 +1,34 @@
+# ==============================================================================
+# PhishGuard_AI - DVC Pipeline
+# ==============================================================================
+stages:
+  prepare_data:
+    cmd: python -m stages.01_prepare_data --config configs/pipeline.yaml
+    deps:
+      - data/raw
+    outs:
+      - data/processed
+      - data/splits
+
+  train:
+    cmd: python -m stages.02_train --config configs/pipeline.yaml
+    deps:
+      - data/splits
+      - configs/models/url_model.yaml
+    outs:
+      - models/candidate
+
+  evaluate:
+    cmd: python -m stages.03_evaluate --config configs/pipeline.yaml
+    deps:
+      - models/candidate
+      - data/splits
+    outs:
+      - reports/evaluation
+
+  export_onnx:
+    cmd: python -m stages.04_export_onnx --config configs/pipeline.yaml
+    deps:
+      - models/candidate
+    outs:
+      - models/exported

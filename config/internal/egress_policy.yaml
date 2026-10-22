@@ -1,0 +1,42 @@
+# ==============================================================================
+# PhishGuard_AI - External Network Egress Policy
+# ==============================================================================
+# Governs outbound network access from analyzers and the sandbox.
+# SSRF guard is fail-closed: any violation denies the request.
+# ==============================================================================
+
+version: 1.0.0
+fail_closed: true
+
+allowed_schemes:
+  - https
+  - http
+
+deny:
+  metadata_endpoints: true
+  private_ranges: true
+  link_local: true
+  loopback: true
+  carrier_grade_nat: true
+  reserved: true
+  multicast: true
+
+hostname_allowlist:
+  enabled: false
+  entries: []
+
+hostname_denylist:
+  - metadata.google.internal
+  - metadata.google.com
+  - 169.254.169.254
+  - 169.254.170.2
+
+redirect:
+  enabled: true
+  max_depth: 5
+  revalidate_each_hop: true
+
+dns:
+  timeout_seconds: 2.0
+  max_resolved_addresses: 64
+  validate_every_resolved_address: true

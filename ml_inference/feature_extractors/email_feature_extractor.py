@@ -412,12 +412,14 @@ class EmailFeatureExtractor(BaseFeatureExtractor):
     # ------------------------------------------------------------------
     def _extract_attachment_features(self, features: Dict[str, float], att: Mapping[str, Any]) -> None:
         # ... original (with added deadline check)
+        pass
 
     # ------------------------------------------------------------------
     # Macro features (unchanged)
     # ------------------------------------------------------------------
     def _extract_macro_features(self, features: Dict[str, float], macro: Mapping[str, Any]) -> None:
         # ... original
+        pass
 
     # ------------------------------------------------------------------
     # Cross-analyzer (ENHANCED)

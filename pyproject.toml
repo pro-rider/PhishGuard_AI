@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phishguard-ai"
+version = "14.0.0"
+description = "Enterprise-grade AI phishing detection platform"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi>=0.111.0,<0.116.0",
+    "uvicorn[standard]>=0.30.0,<0.33.0",
+    "pydantic>=2.7.0,<3.0.0",
+    "pydantic-settings>=2.3.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "bandit>=1.7.0",
+]
+
+[tool.setuptools]
+packages = [
+    "api_gateway", "core", "engine", "security", "storage", "policy",
+    "quarantine", "sandbox", "case_management", "observability",
+    "messaging", "ioc", "reputation", "ml_inference",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["unit: fast unit tests", "integration: integration tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = ["E501"]

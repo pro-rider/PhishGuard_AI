@@ -316,6 +316,19 @@ class Settings(BaseSettings):
     )
 
     # ========================================================================
+    # API GATEWAY AUTHENTICATION
+    # ========================================================================
+
+    # Comma-separated static API keys accepted by AuthGuardMiddleware. Business
+    # endpoints (/scan, /cases, /quarantine, ...) reject requests without a
+    # matching key sent in the X-API-Key header (or Authorization: Bearer).
+    # Leave unset to run in locked-down mode (only exempt paths are reachable).
+    API_KEYS: str | None = Field(
+        default=None,
+        description="Comma-separated API keys accepted by the auth guard.",
+    )
+
+    # ========================================================================
     # SSRF / OUTBOUND NETWORK SECURITY
     # ========================================================================
 

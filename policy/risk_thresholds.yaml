@@ -1,0 +1,26 @@
+# ==============================================================================
+# PhishGuard_AI - Risk Thresholds
+# ==============================================================================
+# Consumed by policy.policy_engine. Score range: 0.0 (benign) - 1.0 (critical).
+# ==============================================================================
+
+version: 1.0.0
+
+thresholds:
+  # Scores at or above a threshold trigger the corresponding action.
+  block: 0.85
+  quarantine: 0.60
+  review: 0.30
+
+actions:
+  review: "mark_for_review"
+  quarantine: "quarantine"
+  block: "block"
+
+default_verdict:
+  below_review: "INFORMATIONAL"
+  review_to_quarantine: "LOW"
+  quarantine_to_block: "MEDIUM"
+  at_or_above_block: "HIGH"
+  critical_threshold: 0.95
+  critical_verdict: "CRITICAL"

@@ -45,7 +45,10 @@ from tests import (
     assert_dataframe_schema,
 )
 
-from src.stages.01_prepare_data import prepare_data_stage
+import importlib
+
+_prepare_module = importlib.import_module("src.stages.01_prepare_data")
+prepare_data_stage = _prepare_module.prepare_data_stage
 
 
 # =============================================================================

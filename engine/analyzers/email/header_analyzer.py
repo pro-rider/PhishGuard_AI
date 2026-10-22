@@ -498,7 +498,7 @@ class HeaderAnalyzer(BaseAnalyzer):
 
         # Calculate DMARC Relaxed Alignment
         spf_aligned = (from_domain == return_path_domain) if (from_domain and return_path_domain) else False
-        dkim_aligned = any(from_domain == d domain for d domain in dkim_domains) if from_domain else False
+        dkim_aligned = any(from_domain == d for d in dkim_domains) if from_domain else False
 
         return AuthenticationEvidence(
             authserv_id=matched_authserv_id,

@@ -225,6 +225,7 @@ class RuleValidation:
     @staticmethod
     def bounded_string(value: Any, *, name: str, maximum: int, allow_empty: bool = True) -> str:
         # ... (original) ...
+        pass
 
     @staticmethod
     def validate_target(value: Any, *, name: str = "condition.value") -> Any:
@@ -403,6 +404,7 @@ class RuleEvaluator:
 class RuleEngine:
     def __init__(self, *, max_rules: int = MAX_RULES) -> None:
         # ... (original) ...
+        pass
 
     # ... (all original methods) ...
 
