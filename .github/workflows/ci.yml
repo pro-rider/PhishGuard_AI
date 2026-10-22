@@ -1,0 +1,69 @@
+# ==============================================================================
+# PhishGuard_AI - CI pipeline
+#
+# Gates on every push to main and every pull request:
+#   1. Lint   : ruff (F/E/W/B correctness set, see pyproject.toml)
+#   2. Syntax : compileall over the core app + tests
+#   3. Sec    : bandit (fail on HIGH severity) + pip-audit (declared deps)
+#   4. Tests  : unit auth-security suite + full API integration suite
+#
+# Uses requirements-ci.txt (the tested core runtime), not the aspirational
+# requirements.txt, so the pipeline is green and reproducible.
+# ==============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CI dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Ruff (correctness lint, maintained core)
+        run: ruff check api_gateway config engine security storage quarantine case_management observability tests
+
+      - name: Syntax gate (compileall)
+        run: python -m compileall -q api_gateway config engine security storage quarantine case_management observability tests
+
+      - name: Bandit (fail on HIGH)
+        run: bandit -q -r api_gateway config engine security storage quarantine case_management observability tests -lll
+
+      - name: pip-audit (declared dependencies)
+        run: pip-audit --progress-spinner off -r requirements-ci.txt
+
+  test:
+    name: Unit + integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CI dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Unit tests (auth / security posture)
+        run: python tests/unit/test_auth_security.py
+
+      - name: Integration tests (API end-to-end)
+        run: python tests/integration/test_api.py

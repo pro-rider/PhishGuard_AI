@@ -24,8 +24,6 @@ import math
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
-from enum import Enum
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -126,7 +124,7 @@ HOMOGLYPH_MAP: Dict[str, str] = {
 
 # Common visual / keyboard substitutions for typosquat
 VISUAL_CONFUSABLES: Dict[str, str] = {
-    "0": "o", "1": "l", "1": "i", "3": "e", "4": "a", "5": "s",
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s",
     "7": "t", "@": "a", "$": "s", "!": "i",
     "l": "i", "I": "l", "O": "0", "S": "5",
 }
@@ -593,7 +591,7 @@ class DomainAnalyzer(BaseAnalyzer):
                     )
 
                 # ----- Newly registered / age -----
-                age_map = data_age = None
+                age_map = None
                 meta_data = getattr(getattr(context, "metadata", None), "data", {}) or {}
                 age_map = meta_data.get("domain_ages") or {}
                 creation_ts = (

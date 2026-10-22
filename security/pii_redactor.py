@@ -24,7 +24,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import BaseModel, SecretStr

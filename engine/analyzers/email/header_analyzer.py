@@ -13,7 +13,7 @@ Key Security Controls:
    trusted gateway boundary, ignoring untrusted or sender-injected headers.
 3. Strict Input Bounds: Rejects oversized header payloads (fail-closed) rather
    than silently truncating security-critical inputs.
-4. RFC 7489 DMARC Alignment Engine: Calculates relaxed/strict alignment between 
+4. RFC 7489 DMARC Alignment Engine: Calculates relaxed/strict alignment between
    RFC 5322 From, RFC 5321 MailFrom, and DKIM signing domains.
 5. Multi-Hop Network Trace Engine: Parses Received headers, validating IP
    routability via Python's native ipaddress module without ReDoS vulnerability.
@@ -32,9 +32,9 @@ import ipaddress
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 from engine.orchestrator import (
     AnalyzerExecutionStatus,
@@ -43,7 +43,6 @@ from engine.orchestrator import (
     BaseAnalyzer,
     ConstrainedMetadata,
     Finding,
-    PayloadReference,
     ScanContext,
     ScanType,
     SecurityVerdict,

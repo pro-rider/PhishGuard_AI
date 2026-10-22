@@ -159,7 +159,7 @@ def configure_logging() -> None:
 
     if not has_phishguard_handler:
         handler = logging.StreamHandler(sys.stdout)
-        setattr(handler, "_phishguard_handler", True)
+        handler._phishguard_handler = True
         handler.setFormatter(formatter)
         root_logger.addHandler(handler)
 

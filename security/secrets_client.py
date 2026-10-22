@@ -28,7 +28,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from pydantic import SecretStr
 
@@ -285,7 +285,7 @@ class AWSSecretsManagerProvider:
                 f"AWS Secrets Manager failed to retrieve secret '{name}' (Error Code: {error_code})."
             ) from None
 
-        except BotoCoreError as exc:
+        except BotoCoreError:
             logger.error(
                 "aws_secrets_manager_transport_error",
                 extra={
@@ -495,7 +495,7 @@ class SecretsClient:
             secret = self._provider.get_secret(name)
         except SecretsError:
             raise
-        except Exception as exc:
+        except Exception:
             logger.error(
                 "unexpected_secret_retrieval_failure",
                 extra={

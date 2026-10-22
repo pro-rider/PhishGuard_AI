@@ -17,7 +17,6 @@ import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
 
 # ============================================================================
 # BOUNDS & CONSTANTS
@@ -28,13 +27,14 @@ CONTEXT_KEY = "correlation_id"
 MAX_LENGTH = 128
 _CORRELATION_REGEX = re.compile(r"^[A-Za-z0-9_\-.]{1,128}$")
 
-_DEFAULT_GENERATOR = lambda: f"pg_{uuid.uuid4().hex}"
+def _default_generator() -> str:
+    return f"pg_{uuid.uuid4().hex}"
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """Attach a validated correlation id to every request."""
 
-    def __init__(self, app, *, generator=_DEFAULT_GENERATOR) -> None:
+    def __init__(self, app, *, generator=_default_generator) -> None:
         super().__init__(app)
         self._generator = generator
 

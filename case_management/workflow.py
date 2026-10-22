@@ -13,7 +13,7 @@ Security / reliability principles:
 from __future__ import annotations
 
 import enum
-from typing import Dict, Optional, Sequence
+from typing import Dict, Sequence
 
 # ============================================================================
 # STATUSES & TRANSITIONS

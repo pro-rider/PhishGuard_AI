@@ -14,7 +14,7 @@ Behavior:
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 from typing import Callable
 
 from security.identity import Principal

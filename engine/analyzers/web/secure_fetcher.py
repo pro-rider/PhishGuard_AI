@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-import re
 import socket
 import ssl
 import time

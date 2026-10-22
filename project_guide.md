@@ -282,7 +282,25 @@ Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, quarantine, the a
 
 ---
 
-## 8. Unit Tests & Syntax Check
+## 8. CI/CD (GitHub Actions)
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+
+| Gate | Command | Failure = |
+|------|---------|-----------|
+| Lint | `ruff check api_gateway config engine security storage quarantine case_management observability tests` | Any F/E/W/B issue (correctness set; see `pyproject.toml`) |
+| Syntax | `python -m compileall -q <core dirs> tests` | Any module that fails to compile |
+| Security | `bandit -r <core dirs> -lll` | Any **HIGH** severity finding |
+| Deps | `pip-audit -r requirements-ci.txt` | Any known vulnerability in the CI dependency set |
+| Unit | `python tests/unit/test_auth_security.py` | Auth / security-posture regression |
+| Integration | `python tests/integration/test_api.py` | Any end-to-end API regression |
+
+CI installs `requirements-ci.txt` — the *tested core runtime* — not the aspirational
+`requirements.txt`, so the pipeline is green and reproducible. **Dependency note:**
+the core runtime was moved to `fastapi>=0.159` / `starlette>=1.9`, resolving the
+starlette 0.46.x CVE set that `pip-audit` was flagging.
+
+## 9. Unit Tests & Syntax Check
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest tests/unit -q
@@ -296,7 +314,7 @@ A `compileall` over the whole tree is a quick syntax gate:
 
 ---
 
-## 9. Configuration
+## 10. Configuration
 
 Settings live in `config/internal/settings.py` (pydantic-settings). Override via environment variables or a `.env` file (see `.env.example`).
 
@@ -304,7 +322,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 10. Security Notes
+## 11. Security Notes
 
 - **SSRF guard** (`security/ssrf_guard.py`): blocks private/link-local/loopback targets by default; DNS-based resolution may reject benchmark IPs (normal).
 - **Encryption at rest** (`storage/encryption.py`): AES-GCM keyring. The quarantine manager auto-provisions an in-process active key so it works out of the box; bring your own key manager for persistence.
@@ -312,7 +330,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 11. Known Limitations & Roadmap
+## 12. Known Limitations & Roadmap
 
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
 - **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
@@ -321,7 +339,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 12. Git Workflow
+## 13. Git Workflow
 
 ```powershell
 git add -A
@@ -333,7 +351,7 @@ Repo: `https://github.com/pro-rider/PhishGuard_AI`
 
 ---
 
-## 13. Maintenance & Operations Guide
+## 14. Maintenance & Operations Guide
 
 How to keep PhishGuard_AI running, upgrading, and safe. Read this before changing
 schema, auth, analyzers, or endpoints.

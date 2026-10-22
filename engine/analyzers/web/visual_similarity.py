@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Set, Tuple
 from urllib.parse import urlsplit
 
 from engine.orchestrator import (

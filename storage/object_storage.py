@@ -20,7 +20,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Iterator, Optional, Tuple
+from typing import BinaryIO, Iterator, Optional
 
 from config.internal.settings import settings
 

@@ -28,22 +28,17 @@ import json
 import logging
 import math
 import re
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.orchestrator import (
     AnalyzerExecutionStatus,
-    PipelineExecutionState,
     PipelineResult,
-    ScanType,
     SecurityVerdict,
 )
 from engine.scoring_engine import (
-    ScoreContribution,
-    ScoringBreakdown,
     ThreatAssessment,
 )
 

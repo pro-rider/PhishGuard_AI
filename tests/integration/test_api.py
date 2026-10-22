@@ -168,7 +168,7 @@ def main() -> int:
     )
     check(
         "case_cross_tenant_hidden",
-        c.get(f"/cases/not-a-real-id", headers=admin_h).status_code == 404,
+        c.get("/cases/not-a-real-id", headers=admin_h).status_code == 404,
     )
 
     # 6b. Quarantine workflow: create -> get -> preview -> release -> delete.

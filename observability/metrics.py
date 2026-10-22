@@ -14,8 +14,9 @@ Security / reliability principles:
 from __future__ import annotations
 
 import logging
+import re
 import time
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Sequence
 
 try:
     from prometheus_client import (
@@ -49,7 +50,6 @@ MAX_LABELS_PER_METRIC = 16
 DEFAULT_HISTOGRAM_BUCKETS = (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 15.0, 60.0)
 
 _NAME_REGEX = None  # validated at write time by prometheus; we pre-validate below
-import re
 
 _METRIC_NAME_REGEX = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
 _LABEL_NAME_REGEX = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")

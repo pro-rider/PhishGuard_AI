@@ -20,7 +20,6 @@ import asyncio
 import ipaddress
 import logging
 import math
-import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field

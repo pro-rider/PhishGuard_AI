@@ -21,7 +21,6 @@ import io
 import logging
 import re
 import time
-import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -47,7 +46,6 @@ try:
         DictionaryObject,
         IndirectObject,
         NameObject,
-        TextStringObject,
     )
     PYPDF_AVAILABLE = True
 except ImportError:

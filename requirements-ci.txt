@@ -1,0 +1,58 @@
+# ==============================================================================
+# PhishGuard_AI - CI dependency set (the *tested* core runtime)
+# ==============================================================================
+# The broad `requirements.txt` is the aspirational full target (ML, browser
+# sandbox, mail integration, etc.) and is not cleanly installable in CI.
+# This file pins the packages the core app actually imports so `import
+# api_gateway.main` + the unit/integration suites work. Install in CI with:
+#     pip install -r requirements-ci.txt
+# ==============================================================================
+
+# Web / API framework (upgraded line: starlette>=1.9 resolves all known CVE)
+fastapi>=0.159.0,<0.160.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+starlette>=1.9.0
+
+# Persistence
+sqlalchemy>=2.0.30
+alembic>=1.13.0
+
+# Security / auth / crypto
+cryptography>=42.0.0
+pyjwt[crypto]>=2.8.0
+
+# Observability
+prometheus-client>=0.20.0
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+structlog>=24.2.0
+
+# URL / web / parsing
+aiohttp>=3.9.0
+beautifulsoup4>=4.12.0
+dnspython>=2.6.0
+idna>=3.7
+pypdf>=4.2.0
+tldextract>=5.1.0
+brotli>=1.1.0
+playwright>=1.44.0
+
+# Attachments / IOC
+oletools>=0.60.1
+yara-python>=4.5.0
+
+# Queue / cache (used by modules even if Redis is optional at runtime)
+redis>=5.0.0
+
+# Cloud (S3/object-store path used by quarantine evidence, optional at runtime)
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Test client + tools
+httpx>=0.27.0
+pytest>=8.2.0
+ruff>=0.4.0
+bandit>=1.7.0
+pip-audit>=2.7.0

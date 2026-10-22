@@ -1102,7 +1102,6 @@ __all__ = [
     "audit_logger",
     "audit_summary",
     "create_checkpoint_anchor",
-    "seed_stream_state",
     "verify_event_hash",
     "verify_hash_chain",
 ]

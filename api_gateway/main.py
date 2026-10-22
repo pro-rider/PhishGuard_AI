@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTasks
 from starlette.responses import Response, StreamingResponse
@@ -47,14 +47,12 @@ from case_management.cases import (
 from case_management.comments import (
     CommentError,
     CommentManager,
-    CommentNotFoundError,
     CommentVisibility,
 )
 from case_management.evidence import (
     EvidenceError,
     EvidenceKind,
     EvidenceManager,
-    EvidenceNotFoundError,
 )
 from config.internal.settings import settings
 from engine.analyzers.email.nlp_detector import NLPDetectorAnalyzer
@@ -67,13 +65,12 @@ from engine.orchestrator import (
     ScanContext,
     ScanType,
 )
-from observability.alerting import AlertManager, AlertSeverity, SecurityAlert
+from observability.alerting import AlertSeverity
 from observability.metrics import metrics
 from quarantine.email_quarantine import (
     EmailQuarantineManager,
     InvalidTransitionError,
     MessageNotFoundError,
-    QuarantineStatus,
 )
 from security.rbac import require_roles
 from storage.audit import AuditManager
@@ -82,7 +79,6 @@ from storage.scan_jobs import (
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_PENDING,
-    STATUS_RUNNING,
     ScanJobManager,
     ScanJobNotFoundError,
 )
@@ -275,7 +271,6 @@ def create_app() -> FastAPI:
     comment_manager = CommentManager(db_path=DB_PATH)
     evidence_manager = EvidenceManager(db_path=DB_PATH)
     quarantine_manager = EmailQuarantineManager(db_path=DB_PATH)
-    alert_manager = AlertManager()
 
     # Durable backend for async scan jobs + the immutable audit trail.
     store = SqlAlchemyStore(DB_PATH)

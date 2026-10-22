@@ -1,7 +1,7 @@
 """
 PhishGuard_AI - Threat Scoring & Risk Engine
 
-Transforms aggregated analyzer signals, findings, and confidence metrics from 
+Transforms aggregated analyzer signals, findings, and confidence metrics from
 the Detection Orchestrator into calibrated, deterministic security scores and verdicts.
 
 Key Architectural & Security Controls:
@@ -37,19 +37,14 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Sequence,
     Set,
     Tuple,
-    Union,
 )
 
 from engine.orchestrator import (
     AnalyzerExecutionStatus,
-    AnalyzerResult,
-    Finding,
     PipelineExecutionState,
     PipelineResult,
-    ScanType,
     SecurityVerdict,
 )
 

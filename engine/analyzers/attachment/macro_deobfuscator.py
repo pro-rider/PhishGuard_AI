@@ -897,7 +897,7 @@ class MacroDeobfuscatorAnalyzer(BaseAnalyzer):
                         "SUSPICIOUS_INFRASTRUCTURE",
                         SecurityVerdict.MEDIUM,
                         0.90,
-                        f"Anti-analysis / sandbox-evasion indicators in macro.",
+                        "Anti-analysis / sandbox-evasion indicators in macro.",
                         14.0,
                         {**base, "indicators": result.evasion_triggers[:12]},
                     )
@@ -909,7 +909,7 @@ class MacroDeobfuscatorAnalyzer(BaseAnalyzer):
                         "SUSPICIOUS_INFRASTRUCTURE",
                         SecurityVerdict.MEDIUM,
                         0.91,
-                        f"Native Windows API declarations in macro.",
+                        "Native Windows API declarations in macro.",
                         14.0,
                         {
                             **base,
@@ -936,7 +936,7 @@ class MacroDeobfuscatorAnalyzer(BaseAnalyzer):
                         "SUSPICIOUS_INFRASTRUCTURE",
                         SecurityVerdict.MEDIUM,
                         0.94,
-                        f"Suspicious CreateObject targets in macro.",
+                        "Suspicious CreateObject targets in macro.",
                         16.0,
                         {**base, "targets": suspicious_co[:12]},
                     )

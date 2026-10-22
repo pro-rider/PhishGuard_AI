@@ -16,7 +16,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Mapping, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 

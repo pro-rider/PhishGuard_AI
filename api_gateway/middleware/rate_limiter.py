@@ -12,11 +12,11 @@ Security / reliability principles:
 from __future__ import annotations
 
 import time
-from typing import Dict, MutableMapping, Tuple
+from typing import MutableMapping, Optional, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 # ============================================================================
 # BOUNDS & CONSTANTS

@@ -1,7 +1,7 @@
 """
 PhishGuard_AI - Production Detection Engine Orchestrator
 
-Central detection pipeline coordinator managing parallel, dependency-aware, 
+Central detection pipeline coordinator managing parallel, dependency-aware,
 and resource-isolated execution of security analyzers across Email, URL, Web,
 and Attachment subsystems.
 
@@ -10,7 +10,7 @@ Key Security & Execution Controls:
 1. True Process & Subprocess Isolation: CPU-bound tasks execute in process pools;
    subprocess tasks execute under a managed lifecycle with hard OS termination (SIGKILL)
    on cancellation or timeout.
-2. Capability & DAG Dependency Scheduler: Analyzers declare capabilities, inputs, and 
+2. Capability & DAG Dependency Scheduler: Analyzers declare capabilities, inputs, and
    explicit dependencies. Execution follows a dynamically scheduled Directed Acyclic Graph.
 3. Global Multi-Tenant Resource Manager: Bounded resource budgets across ASYNC_IO,
    CPU_BOUND, SUBPROCESS, and EXTERNAL_NETWORK prevent resource exhaustion.
@@ -20,7 +20,7 @@ Key Security & Execution Controls:
    MappingProxyType and strict string/type bounds.
 6. Mathematical Invariant & Result Guards: Rejects NaN/Inf numeric values, enforces analyzer
    identity, and validates hard-override permissions.
-7. Fail-Closed Verdict & Audit Policies: Pipeline fails closed to HIGH/CRITICAL if 
+7. Fail-Closed Verdict & Audit Policies: Pipeline fails closed to HIGH/CRITICAL if
    trustworthy analyzer execution is compromised or audit logging fails.
 """
 
@@ -41,7 +41,6 @@ from enum import Enum
 from types import MappingProxyType
 from typing import (
     Any,
-    Callable,
     Dict,
     List,
     Mapping,
@@ -369,7 +368,7 @@ class OrchestratorConfig:
     total_pipeline_timeout_seconds: float = 30.0
     per_analyzer_timeout_seconds: float = 8.0
     max_concurrent_scans: int = 50
-    
+
     # Global Resource Limits
     global_max_async_io: int = 100
     global_max_cpu_workers: int = 8
@@ -434,7 +433,7 @@ class GlobalResourceManager:
         self.cpu_sem = asyncio.Semaphore(config.global_max_cpu_workers)
         self.subprocess_sem = asyncio.Semaphore(config.global_max_subprocesses)
         self.network_sem = asyncio.Semaphore(config.global_max_external_network)
-        
+
         # Dedicated Process Pool for CPU heavy work
         self.cpu_pool = concurrent.futures.ProcessPoolExecutor(
             max_workers=config.global_max_cpu_workers
@@ -636,7 +635,7 @@ class DetectionOrchestrator:
 
         for wave in waves:
             if time.monotonic() >= pipeline_deadline:
-                errors.append(f"Global pipeline timeout prior to wave execution.")
+                errors.append("Global pipeline timeout prior to wave execution.")
                 break
 
             tasks: List[asyncio.Task] = []

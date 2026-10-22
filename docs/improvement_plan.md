@@ -103,7 +103,17 @@ Status vs roadmap: items #6 (observability) and #7 (wire analyzers, safely behin
 - **Brute-force protection on `/auth/token`** — in-memory login throttle (5 failures / 15 min window → 429 lockout, reset on success) + failed-login audit rows (`auth.token.failed`). Move to Redis for multi-worker.
 - **Unit tests** — `tests/unit/test_auth_security.py` (fail-closed open mode, least-privilege keys, parse, throttle). Both unit + integration suites green.
 
-**Honest remaining (infra/external-bound, documented, not faked):** KMS/Vault envelope encryption + key rotation (currently dev-grade persisted key), Postgres RLS + real columns (currently JSON-blob tables), Celery/Redis async runner + heartbeats/stuck-job recovery, MIME/header analyzers + full-message parsing, threat-intel feeds with caching, labeled-dataset eval harness (precision/recall), SSRF DNS-pinning/redirect revalidation, CI/CD (ruff/mypy/pytest+coverage/bandit/Trivy), gunicorn+multiprocess+Redis rate limiting, SRI/CSP + cookie-based dashboard auth, API versioning (/v1).
+**Honest remaining (infra/external-bound, documented, not faked):** KMS/Vault envelope encryption + key rotation (currently dev-grade persisted key), Postgres RLS + real columns (currently JSON-blob tables), Celery/Redis async runner + heartbeats/stuck-job recovery, MIME/header analyzers + full-message parsing, threat-intel feeds with caching, labeled-dataset eval harness (precision/recall), SSRF DNS-pinning/redirect revalidation, gunicorn+multiprocess+Redis rate limiting, SRI/CSP + cookie-based dashboard auth, API versioning (/v1), mypy strict typing, Trivy container scanning (needs a Dockerfile).
+
+## Delivered this session (round 6 — CI/CD + dependency hardening)
+
+- **GitHub Actions CI** — `.github/workflows/ci.yml`: on push to `main` + every PR, two jobs gate:
+  - *Lint & security*: `ruff` (F/E/W/B correctness set, see `pyproject.toml`), `compileall` syntax gate, `bandit -lll` (fail on HIGH), `pip-audit -r requirements-ci.txt`.
+  - *Unit + integration*: `python tests/unit/test_auth_security.py` + `python tests/integration/test_api.py`.
+- **`requirements-ci.txt`** — the *tested core runtime* (packages the app actually imports), so CI is green and reproducible instead of fighting the aspirational `requirements.txt`.
+- **Resolved a real CVE** — `pip-audit` flagged 14 advisories in **starlette 0.46.2** (pulled by the old `fastapi<0.116` pin). Upgraded the core runtime to **fastapi 0.159.1 / starlette 1.9.0**; full unit + integration suites still green; `pip-audit` now reports **no known vulnerabilities**.
+- **Lint hardening** — configured ruff to a correctness-focused rule set and fixed the resulting real issues across the core: 5 missing `typing` imports (`Optional`/`Tuple`, latent bugs masked by `from __future__ import annotations`), an undefined name in `security/audit_log.py` `__all__`, a duplicate dict key in `domain_analyzer`, unused variables, trailing whitespace, dead `alert_manager` wiring, and a mid-module `import re` in `metrics.py`.
+- **Docs** — `project_guide.md` new §8 CI/CD (gate table + dependency note), sections renumbered to 14; `pyproject.toml` ruff config documented.
 
 ## Delivered this session (round 5 — analyst-grade case / quarantine workflow)
 

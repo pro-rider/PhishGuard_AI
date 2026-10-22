@@ -18,7 +18,6 @@ Security / reliability principles:
 
 from __future__ import annotations
 
-import ipaddress
 import math
 import re
 import time
@@ -225,7 +224,6 @@ class HeuristicContentAnalyzer(BaseAnalyzer):
         if not raw:
             return 0.0
         score = 0.0
-        lower = raw.lower()
 
         # 1. Non-HTTP scheme is inherently risky in a scan context.
         m = _URL_SCHEME_RE.match(raw)

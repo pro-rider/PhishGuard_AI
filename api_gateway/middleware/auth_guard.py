@@ -28,11 +28,10 @@ from typing import FrozenSet, Optional, Sequence, Set, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from security.identity import (
     ROLES,
-    ROLE_ANALYST,
     ROLE_VIEWER,
     Principal,
     IdentityStore,
@@ -141,7 +140,7 @@ class AuthenticationGuard:
             tenant, roles = self._key_meta.get(api_key, ("system", frozenset({ROLE_VIEWER})))
             self._attach(
                 request,
-                Principal(username=f"apikey", tenant=tenant, roles=roles),
+                Principal(username="apikey", tenant=tenant, roles=roles),
             )
             return
 
@@ -150,7 +149,7 @@ class AuthenticationGuard:
             token = auth_header[len(BEARER_PREFIX):].strip()
             if self._validate_key(token):
                 tenant, roles = self._key_meta.get(token, ("system", frozenset({ROLE_VIEWER})))
-                self._attach(request, Principal(username=f"apikey", tenant=tenant, roles=roles))
+                self._attach(request, Principal(username="apikey", tenant=tenant, roles=roles))
                 return
 
         # Open mode is fail-closed: only allowed with an explicit DEV_INSECURE opt-in.

@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-import re
 import time
 import urllib.parse
 from dataclasses import dataclass, field

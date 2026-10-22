@@ -24,7 +24,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Iterable, Optional, Sequence
+from typing import Any, Dict, FrozenSet, Iterable, Optional
 
 # ============================================================================
 # ROLES
