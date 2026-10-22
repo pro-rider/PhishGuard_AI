@@ -75,6 +75,32 @@ def main() -> int:
         str(sig)[:200],
     )
 
+    # 3a. Scan with real RFC 5322 email headers -> header analyzer fires.
+    SPOOFED_HEADERS = (
+        "Return-Path: <bounce@evil-attacker.com>\r\n"
+        'From: "PayPal Security" <security@paypal.com>\r\n'
+        'Reply-To: "PayPal Account Team" <account-verify@evil-attacker.com>\r\n'
+        "Subject: Your account has been limited\r\n"
+        "To: victim@example.com\r\n"
+        "Date: Wed, 21 Oct 2026 10:00:00 +0000\r\n"
+    )
+    hs = c.post(
+        "/scan",
+        json={"email_text": "URGENT verify account", "email_headers": SPOOFED_HEADERS},
+        headers=admin_h,
+    )
+    check("header_scan_200", hs.status_code == 200, str(hs.json()))
+    hsig = hs.json().get("signals", [])
+    hnames = {x.get("analyzer") for x in hsig}
+    check("header_scan_includes_analyzer", "header_analyzer" in hnames, str(hnames))
+    ha = next((x for x in hsig if x.get("analyzer") == "header_analyzer"), None)
+    ha_high = [f for f in (ha or {}).get("findings", []) if f.get("severity") == "HIGH"]
+    check(
+        "header_scan_high_finding",
+        bool(ha_high) and ha_high[0].get("rule_id") == "EMAIL.ALIGNMENT.REPLY_TO_MISMATCH",
+        str(ha_high)[:150],
+    )
+
     # 4. Async job lifecycle.
     a = c.post("/scan/async", json={"email_text": PHISHING_TEXT}, headers=admin_h)
     check("async_submit", a.status_code == 200 and a.json()["status"] == "pending", str(a.json()))

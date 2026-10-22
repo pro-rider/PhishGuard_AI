@@ -121,6 +121,7 @@ class ScanRequest(BaseModel):
 
     target_url: Optional[str] = Field(default=None, max_length=8192)
     email_text: Optional[str] = Field(default=None, max_length=MAX_TEXT_LENGTH)
+    email_headers: Optional[str] = Field(default=None, max_length=MAX_TEXT_LENGTH)
     filename: Optional[str] = Field(default=None, max_length=MAX_FILENAME_LENGTH)
     enable_sandbox: bool = False
     enable_yara: bool = True
@@ -249,6 +250,19 @@ def create_app() -> FastAPI:
         HeuristicContentAnalyzer(),
     ):
         orchestrator.register_analyzer(analyzer)
+
+    # Email header security analyzer: RFC 5322 header spoofing + SPF/DKIM/DMARC
+    # alignment. Offline and deterministic; reads `raw_headers` from the scan
+    # metadata and returns INVALID_INPUT (gracefully skipped) when no headers
+    # were supplied, so plain-text scans are unaffected. Registration is guarded
+    # so a broken analyzer can never fail the whole scan.
+    try:
+        from engine.analyzers.email.header_analyzer import HeaderAnalyzer
+
+        orchestrator.register_analyzer(HeaderAnalyzer())
+        logger.info("Analyzer registered: header_analyzer")
+    except Exception as exc:  # noqa: BLE001 - graceful degradation
+        logger.warning("header_analyzer not registered: %s", exc)
 
     # Feature-flagged extra analyzers (default OFF): structural analyzers like
     # url_parser add strong signals (homograph / SSRF / userinfo / high-entropy)
@@ -1032,6 +1046,10 @@ async def _run_detection(    orchestrator: DetectionOrchestrator,
             {
                 "api_gateway": "true",
                 "email_text": (payload.email_text or "")[:1024],
+                # Full RFC 5322 header block (optional): enables the header
+                # security analyzer (SPF/DKIM/DMARC + Reply-To / display-name
+                # spoofing) on real email headers rather than body text alone.
+                "raw_headers": payload.email_headers or "",
             }
         ),
     )

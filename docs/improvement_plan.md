@@ -103,7 +103,17 @@ Status vs roadmap: items #6 (observability) and #7 (wire analyzers, safely behin
 - **Brute-force protection on `/auth/token`** — in-memory login throttle (5 failures / 15 min window → 429 lockout, reset on success) + failed-login audit rows (`auth.token.failed`). Move to Redis for multi-worker.
 - **Unit tests** — `tests/unit/test_auth_security.py` (fail-closed open mode, least-privilege keys, parse, throttle). Both unit + integration suites green.
 
-**Honest remaining (infra/external-bound, documented, not faked):** KMS/Vault envelope encryption + key rotation (currently dev-grade persisted key), Postgres RLS + real columns (currently JSON-blob tables), Celery/Redis async runner + heartbeats/stuck-job recovery, MIME/header analyzers + full-message parsing, threat-intel feeds with caching, labeled-dataset eval harness (precision/recall), SSRF DNS-pinning/redirect revalidation, gunicorn+multiprocess+Redis rate limiting, SRI/CSP + cookie-based dashboard auth, API versioning (/v1), mypy strict typing, Trivy container scanning (needs a Dockerfile).
+**Honest remaining (infra/external-bound, documented, not faked):** KMS/Vault envelope encryption + key rotation (currently dev-grade persisted key), Postgres RLS + real columns (currently JSON-blob tables), Celery/Redis async runner + heartbeats/stuck-job recovery, **email body / MIME analyzers (BodyAnalyzer + attachment_detector still unregistered; full-body parsing beyond headers)**, threat-intel feeds with caching, labeled-dataset eval harness (precision/recall), SSRF DNS-pinning/redirect revalidation, gunicorn+multiprocess+Redis rate limiting, SRI/CSP + cookie-based dashboard auth, API versioning (/v1), mypy strict typing, Trivy container scanning (needs a Dockerfile).
+
+## Delivered this session (round 7 — email header detection, P0)
+
+- **Registered the email header security analyzer** (`HeaderAnalyzer`, `engine/analyzers/email/header_analyzer.py` — already fully implemented but inactive) into the live detection pipeline in `api_gateway/main.py`, **guarded** so a broken analyzer can never fail a scan (graceful degradation).
+- **`/scan` accepts an optional `email_headers` field** (RFC 5322 header block). `_execute_scan` now passes it as `raw_headers` into the `ScanContext` metadata, so the analyzer inspects real headers — not just the first 1024 chars of body text.
+- **Verified real signals end-to-end**: a crafted spoofed email (`From security@paypal.com`, `Reply-To account-verify@evil-attacker.com`) produces a **HIGH `EMAIL.ALIGNMENT.REPLY_TO_MISMATCH`** finding via the live `POST /scan`, surfaced in `signals`. Plain scans (no headers) return `INVALID_INPUT` and are skipped — existing verdicts unchanged (LOW 38.88 confirmed).
+- **Tests**:
+  - New `tests/unit/test_header_analyzer.py` (6 checks: graceful no-header, spoofed HIGH Reply-To mismatch, positive score, benign clean).
+  - `tests/integration/test_api.py` extended (3a): header scan → `header_analyzer` present + HIGH finding.
+  - Full integration suite (incl. case/quarantine/async/SSE/audit/metrics) + `test_auth_security.py` + `ruff` all green.
 
 ## Delivered this session (round 6 — CI/CD + dependency hardening)
 

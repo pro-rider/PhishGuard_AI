@@ -163,12 +163,20 @@ Run a detection scan.
 ```json
 {
   "target_url": "https://example.com/login",
-  "email_text": "From: ...\nSubject: ...",
+  "email_text": "URGENT: verify your account",
+  "email_headers": "Return-Path: <bounce@evil.com>\r\nFrom: \"PayPal Security\" <security@paypal.com>\r\nReply-To: <verify@evil.com>",
   "filename": "invoice.pdf",
   "enable_sandbox": false,
   "enable_yara": true
 }
 ```
+
+**`email_headers` (optional)** — a full RFC 5322 header block. When supplied, the
+`header_analyzer` runs real header-security checks (SPF/DKIM/DMARC alignment from
+`Authentication-Results`, `Reply-To` vs `From` mismatch, display-name / Return-Path
+spoofing). It contributes a `header_analyzer` signal (e.g. a **HIGH**
+`EMAIL.ALIGNMENT.REPLY_TO_MISMATCH` finding). When omitted it returns
+`INVALID_INPUT` and is skipped, so plain-text scans are unaffected.
 
 Response:
 
@@ -334,7 +342,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
 - **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
-- Email analyzers are fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap); the composite heuristic uses bounded heuristics on that snippet.
+- The email **body** analyzers are still fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap). The **header** analyzer, by contrast, consumes the full `email_headers` block (up to 256 KB) supplied via `/scan`, so header-level spoofing/alignment signals are not truncated.
 - **Persistence:** cases + quarantine + comments + evidence + the quarantine encryption key survive restarts via SQLAlchemy (SQLite default; PostgreSQL via `SQLALCHEMY_DATABASE_URI` + Alembic migrations). Key management still dev-grade (persisted key) — see roadmap for Vault/KMS.
 
 ---
