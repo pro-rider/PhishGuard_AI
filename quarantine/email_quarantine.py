@@ -28,7 +28,7 @@ from storage.object_storage import (
     ObjectNotFoundError,
     object_storage as _default_storage,
 )
-from storage.persistence import SqliteStore
+from storage.repository import SqlAlchemyStore
 
 # ============================================================================
 # BOUNDS & CONSTANTS
@@ -129,7 +129,7 @@ class EmailQuarantineManager:
         # Optional durable backend: records + the encryption key are persisted to
         # SQLite so quarantined data survives process restarts. In-memory dict
         # remains the fast read index.
-        self._store = SqliteStore(db_path) if db_path else None
+        self._store = SqlAlchemyStore(db_path) if db_path else None
         if encryption is None:
             encryption = (
                 self._build_persistent_encryption()

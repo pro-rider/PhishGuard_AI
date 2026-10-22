@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 from case_management.workflow import CaseStatus, CaseWorkflowManager
-from storage.persistence import SqliteStore
+from storage.repository import SqlAlchemyStore
 
 # ============================================================================
 # BOUNDS & CONSTANTS
@@ -103,10 +103,11 @@ class CaseManager:
         self._workflow = workflow or CaseWorkflowManager()
         self._lock = threading.RLock()
         self._cases: Dict[str, SecurityCase] = {}
-        # Optional durable backend: when a db_path is supplied, records are
-        # written through to SQLite and reloaded on startup so they survive
-        # process restarts. In-memory dict stays the fast read index.
-        self._store = SqliteStore(db_path) if db_path else None
+        # Optional durable backend: when a db_path/dsn is supplied, records are
+        # written through to SQLAlchemy (SQLite by default, PostgreSQL when the
+        # SQLALCHEMY_DATABASE_URI env is set) and reloaded on startup so they
+        # survive process restarts. In-memory dict stays the fast read index.
+        self._store = SqlAlchemyStore(db_path) if db_path else None
         if self._store is not None:
             for _case_id, data in self._store.load_all("cases"):
                 try:

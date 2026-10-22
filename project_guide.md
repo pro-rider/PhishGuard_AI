@@ -163,6 +163,33 @@ Response:
 
 `verdict` ∈ `INFORMATIONAL | LOW | MEDIUM | HIGH | CRITICAL`.
 
+### `POST /scan/async`
+Submit a long-running scan. Returns a **durable job** immediately (`202`-style payload):
+
+```json
+{
+  "job_id": "job_...",
+  "status": "pending",
+  "poll_url": "/scan/jobs/job_...",
+  "events_url": "/scan/jobs/job_.../events"
+}
+```
+
+### `GET /scan/jobs/{job_id}`
+Poll a scan job. `status` ∈ `pending | running | completed | failed`; `result` holds the same payload as `POST /scan` once completed.
+
+### `GET /scan/jobs/{job_id}/events`
+Server-Sent Events (SSE) stream: progress events, then a `result` event and a `done` event. Subscribe with `EventSource` or `curl -N`.
+
+### `GET /scan/jobs`
+List scan jobs (latest first).
+
+### `GET /audit`
+Read the immutable audit trail (who did what, when, from which IP).
+
+### `GET /ready`
+Readiness probe that actually checks the durable store: `{ "status": "ready", "db": "ok" }`.
+
 ### `POST /cases`
 Create an incident case. Body: `{ "title", "description", "severity", "assignee" }`.
 
@@ -180,7 +207,23 @@ Return the recognized severity scale.
 
 ---
 
-## 6. Tests
+## 6. Persistence
+
+- **Default:** SQLite via SQLAlchemy at `storage/data/phishguard.db` (gitignored). Set `PHISHGUARD_DB` to relocate.
+- **PostgreSQL:** set `SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://user:pass@host/db` (add the driver) — the app and migrations automatically target it.
+- **Migrations:** `python -m alembic upgrade head` (see `alembic.ini` / `migrations/`). Existing databases stay compatible (same `id`/`data` table layout).
+
+## 7. Tests
+
+```powershell
+python tests/integration/test_api.py
+```
+
+Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, and the audit trail against a throwaway SQLite DB.
+
+---
+
+## 8. Unit Tests & Syntax Check
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest tests/unit -q
@@ -194,7 +237,7 @@ A `compileall` over the whole tree is a quick syntax gate:
 
 ---
 
-## 7. Configuration
+## 9. Configuration
 
 Settings live in `config/internal/settings.py` (pydantic-settings). Override via environment variables or a `.env` file (see `.env.example`).
 
@@ -202,7 +245,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 8. Security Notes
+## 10. Security Notes
 
 - **SSRF guard** (`security/ssrf_guard.py`): blocks private/link-local/loopback targets by default; DNS-based resolution may reject benchmark IPs (normal).
 - **Encryption at rest** (`storage/encryption.py`): AES-GCM keyring. The quarantine manager auto-provisions an in-process active key so it works out of the box; bring your own key manager for persistence.
@@ -210,16 +253,16 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 9. Known Limitations & Roadmap
+## 11. Known Limitations & Roadmap
 
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
 - **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
 - Email analyzers are fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap); the composite heuristic uses bounded heuristics on that snippet.
-- **Persistence:** cases + quarantine + the quarantine encryption key now survive restarts via SQLite (`storage/data/phishguard.db`, gitignored, `PHISHGUARD_DB` to override). For production, move to PostgreSQL + Alembic and Vault/KMS key management.
+- **Persistence:** cases + quarantine + the quarantine encryption key survive restarts via SQLAlchemy (SQLite default; PostgreSQL via `SQLALCHEMY_DATABASE_URI` + Alembic migrations). Key management still dev-grade (persisted key) — see roadmap for Vault/KMS.
 
 ---
 
-## 10. Git Workflow
+## 12. Git Workflow
 
 ```powershell
 git add -A

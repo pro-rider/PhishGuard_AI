@@ -11,12 +11,14 @@ with status, feasibility, and a practical execution order.
 
 | Item | Status | Codebase reality | Plan |
 |---|---|---|---|
-| Persistence (cases/quarantine) | ✅ **done (SQLite)** | Was in-memory; `database/` was empty. Added `storage/persistence.py` (write-through SQLite) wired into `CaseManager` + `EmailQuarantineManager`; records **and** the quarantine encryption key survive restart. | Next: PostgreSQL + SQLAlchemy/Alembic for real deployments |
-| Key management | 🟡 | Auto-provisioned AES-GCM key, now persisted to SQLite meta (dev-grade). | Vault / KMS / Key Vault + rotation |
+| Persistence (cases/quarantine) | ✅ **done (SQLAlchemy + Alembic)** | Was stdlib-SQLite-only. Added `storage/database.py` (SQLite default, **PostgreSQL via `SQLALCHEMY_DATABASE_URI`**), `storage/models.py` (cases/quarantine/scan_jobs/audit_log/meta), `storage/repository.py` (drop-in `SqlAlchemyStore`), `alembic.ini` + `migrations/0001_initial`. Managers migrated; existing DBs stay compatible. | Alembic on production PG; Vault/KMS for keys |
+| Key management | 🟡 | Auto-provisioned AES-GCM key, persisted to SQLite meta (dev-grade). | Vault / KMS / Key Vault + rotation |
 | Authentication | ✅ **done (JWT + RBAC)** | Simple API key; **open mode** when `API_KEYS` unset. Middleware exists (`AuthGuardMiddleware`). | Now: JWT (HS256) via `POST /auth/token` + roles Admin/Analyst/Viewer + tenant scope. Next: OIDC / SSO. |
 | Rate limiting | 🟡 | `RateLimiterMiddleware` exists (in-memory). | Redis-backed + per-tenant quotas |
-| Observability | 🟡 | `observability/metrics.py`, `tracing.py`, `alerting.py` exist. | Wire OpenTelemetry → Prometheus/Grafana |
+| Observability | 🟡 | `observability/metrics.py`, `tracing.py`, `alerting.py` exist. `/ready` now probes the DB. | Wire OpenTelemetry → Prometheus/Grafana |
 | SSRF & input safety | 🟡 | `SSRFGuard` used by network-bound analyzers. | Expand allow/deny lists, normalization, sandbox timeouts |
+| Async long-running scans | ✅ **done** | `/scan` is synchronous. Added `/scan/async` (202 + durable job) + `/scan/jobs/{id}` + `/scan/jobs/{id}/events` (SSE). | Celery + Redis for multi-worker scale-out, webhooks |
+| Audit logging | ✅ **done** | No audit trail. Added `storage/audit.py` immutable trail + `GET /audit`; hooked into scan/case/quarantine/auth. | Export, retention, tamper-evident hashing |
 
 ## 2. Feature Completeness
 
@@ -63,25 +65,23 @@ with status, feasibility, and a practical execution order.
 1. ✅ **Persistence (SQLite)** — done this session (biggest risk reduction).
 2. **PostgreSQL + Alembic** swap (replace SQLite adapter, keep same interface).
 3. ✅ **Auth hardening** — JWT + RBAC (Admin/Analyst/Viewer), keep open mode for dev.
-4. **Wire more analyzers** — register offline-safe ones (URLParser, DomainAnalyzer typosquat/entropy, BodyAnalyzer with MIME support) now that they import.
-5. **Observability** — `/metrics` endpoint + OTel traces, dashboard latency/error tiles.
-6. **Async scans** — Celery + Redis for long scans with SSE progress.
-7. **Dashboard upgrade** — SSE live updates + bulk actions; consider HTMX before a full SPA.
-8. **Threat-intel wiring + YARA store**.
-9. **SIEM/SOAR + email-gateway connectors.**
-10. **MLOps** — MLflow + ONNX + explainability.
+4. ✅ **Async scans** — `/scan/async` jobs + SSE (BackgroundTasks; swap to Celery+Redis for scale-out).
+5. ✅ **Audit logging** — immutable DB trail + `GET /audit`.
+6. ✅ **Observability / readiness** — `/ready` probes the DB; JSON logging + correlation ids already present.
+7. **Wire more analyzers** — register offline-safe ones (URLParser, DomainAnalyzer typosquat/entropy) now that they import.
+8. **Prometheus + OTel** metrics/traces; dashboard SSE live tiles.
+9. **PostgreSQL + Alembic in production** (scaffold exists; switch via `SQLALCHEMY_DATABASE_URI`).
+10. **Vault/KMS** key management; **MIME parsing**; **YARA store**; **SIEM/SOAR + gateway connectors**; **dashboard SPA**; **CI/CD**.
 
 ---
 
 ## Delivered this session
 
-- `storage/persistence.py` — SQLite write-through store (cases/quarantine/meta).
-- `case_management/cases.py` — optional `db_path`, load-on-start + write-through.
-- `quarantine/email_quarantine.py` — optional `db_path`, durable encryption key via meta.
-- `api_gateway/main.py` — `DB_PATH` (env-overridable), managers now persistent.
-- `engine/orchestrator.py` — added `COMPUTE`/`NETWORK_IO`/`DOMAIN` enum members + dispatcher routing; all bundled analyzers import again.
-- `.gitignore` — `storage/data/` added.
-- **JWT + RBAC auth** — `security/identity.py` (Principal, PBKDF2 password hashing, stdlib HS256 JWT), `security/rbac.py` (`require_roles` dependency), `api_gateway/middleware/auth_guard.py` (resolves principals from Bearer JWT or `X-API-Key`, open mode preserved), `settings.AUTH_USERS`, and `POST /auth/token`.
+- **Persistence → SQLAlchemy + Alembic** — `storage/database.py` (SQLite default, Postgres via `SQLALCHEMY_DATABASE_URI`), `storage/models.py`, `storage/repository.py` (`SqlAlchemyStore`, drop-in), `alembic.ini` + `migrations/0001_initial`. Managers migrated; existing DBs stay compatible; Alembic `upgrade head` verified.
+- **Async long-running scans** — `storage/scan_jobs.py` (`ScanJobManager`, durable pending→running→completed/failed), `POST /scan/async` (202 + job), `GET /scan/jobs/{id}`, `GET /scan/jobs/{id}/events` (SSE). BackgroundTasks executes; sync `/scan` unchanged.
+- **Audit logging** — `storage/audit.py` (immutable trail: user/action/target/timestamp/IP) + `GET /audit`; hooked into scan/case/quarantine/auth.
+- **DB-aware readiness** — `/ready` writes/reads the store and reports `db: ok|error`.
+- **Integration tests** — `tests/integration/test_api.py` (standalone, throwaway DB): readiness, JWT+RBAC, sync scan, async job + SSE, cases, audit.
+- (Earlier this session) **JWT + RBAC auth**, SQLite persistence, analyzer enum fixes.
 
-Verified: cases + quarantine + encrypted bodies survive a full process restart.
-Verified auth: open mode (no creds) passes; JWT admin → `/scan` 200; viewer → `GET /cases` 200 / `POST /cases` 403; no creds → 401; wrong password → 401.
+Verified: persistence across restart; Alembic migrations; async job completes + SSE; RBAC 403 for viewer writes; 401 no-creds; open mode still passes; integration suite green.
