@@ -29,6 +29,8 @@ from sqlalchemy import select
 from storage import database
 from storage.models import (
     AuditLogRecord,
+    CaseCommentRecord,
+    CaseEvidenceRecord,
     CaseRecord,
     DATA_TABLES,
     MetaRecord,
@@ -44,6 +46,8 @@ _MODELS = {
     "quarantine": QuarantineRecord,
     "scan_jobs": ScanJobRecord,
     "audit_log": AuditLogRecord,
+    "case_comments": CaseCommentRecord,
+    "case_evidence": CaseEvidenceRecord,
 }
 
 
@@ -92,6 +96,17 @@ class SqlAlchemyStore:
             with self._factory() as session:
                 row = session.get(model, record_id)
         return json.loads(row.data) if row is not None else None
+
+    def delete_record(self, table: str, record_id: str) -> None:
+        """Remove a single record (used for delete-able child entities)."""
+        self._check_table(table)
+        model = _MODELS[table]
+        with self._lock:
+            with self._factory() as session:
+                row = session.get(model, record_id)
+                if row is not None:
+                    session.delete(row)
+                    session.commit()
 
     # ------------------------------------------------------------------
     # Key-value metadata (e.g. persisted encryption key id / material)

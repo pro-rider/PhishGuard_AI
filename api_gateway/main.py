@@ -36,9 +36,26 @@ from api_gateway.middleware.auth_guard import (
 from api_gateway.middleware.correlation_id import CorrelationIdMiddleware
 from api_gateway.middleware.rate_limiter import RateLimiterMiddleware
 from api_gateway.middleware.tenant_isolation import TenantIsolationMiddleware
-from case_management.cases import CaseManager, CaseStatus, SecurityCase
-from case_management.comments import CommentManager
-from case_management.evidence import EvidenceManager, EvidenceKind
+from case_management.cases import (
+    CaseError,
+    CaseManager,
+    CaseNotFoundError,
+    CaseStatus,
+    CaseValidationError,
+    SecurityCase,
+)
+from case_management.comments import (
+    CommentError,
+    CommentManager,
+    CommentNotFoundError,
+    CommentVisibility,
+)
+from case_management.evidence import (
+    EvidenceError,
+    EvidenceKind,
+    EvidenceManager,
+    EvidenceNotFoundError,
+)
 from config.internal.settings import settings
 from engine.analyzers.email.nlp_detector import NLPDetectorAnalyzer
 from engine.analyzers.heuristic_analyzer import HeuristicContentAnalyzer
@@ -54,6 +71,8 @@ from observability.alerting import AlertManager, AlertSeverity, SecurityAlert
 from observability.metrics import metrics
 from quarantine.email_quarantine import (
     EmailQuarantineManager,
+    InvalidTransitionError,
+    MessageNotFoundError,
     QuarantineStatus,
 )
 from security.rbac import require_roles
@@ -132,6 +151,54 @@ class QuarantineRequest(BaseModel):
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class CaseUpdateRequest(BaseModel):
+    """Body for updating editable scalar fields on a case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=256)
+    description: Optional[str] = Field(default=None, max_length=16384)
+    assignee: Optional[str] = Field(default=None, max_length=128)
+    severity: Optional[str] = Field(default=None, max_length=16)
+
+
+class CaseTransitionRequest(BaseModel):
+    """Body for a validated case status transition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_status: str = Field(min_length=1, max_length=16)
+    comment: Optional[str] = Field(default=None, max_length=8192)
+
+
+class CommentCreateRequest(BaseModel):
+    """Body for adding a comment to a case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    body: str = Field(min_length=1, max_length=8192)
+    visibility: str = Field(default="internal", max_length=16)
+
+
+class EvidenceAttachRequest(BaseModel):
+    """Body for attaching an evidence reference to a case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(min_length=1, max_length=16)
+    source: str = Field(min_length=1, max_length=128)
+    storage_key: str = Field(min_length=1, max_length=1024)
+    metadata: Optional[Dict[str, str]] = Field(default=None)
+
+
+class QuarantineActionRequest(BaseModel):
+    """Body for a quarantine release/delete action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Optional[str] = Field(default=None, max_length=1024)
+
+
 class AuthTokenRequest(BaseModel):
     """Body for exchanging credentials for a JWT (enabled via AUTH_USERS)."""
 
@@ -205,8 +272,8 @@ def create_app() -> FastAPI:
 
 
     case_manager = CaseManager(db_path=DB_PATH)
-    comment_manager = CommentManager()
-    evidence_manager = EvidenceManager()
+    comment_manager = CommentManager(db_path=DB_PATH)
+    evidence_manager = EvidenceManager(db_path=DB_PATH)
     quarantine_manager = EmailQuarantineManager(db_path=DB_PATH)
     alert_manager = AlertManager()
 
@@ -530,6 +597,216 @@ def create_app() -> FastAPI:
         return [c.to_dict() for c in case_manager.list_for_tenant(tenant_id, status=status_enum)]
 
     # ------------------------------------------------------------------
+    # Case workflow (update / transition / comments / evidence / timeline)
+    # ------------------------------------------------------------------
+
+    def _require_case_tenant(case_id: str, request: Request) -> SecurityCase:
+        try:
+            case = case_manager.get(case_id)
+        except CaseNotFoundError:
+            raise HTTPException(status_code=404, detail="case not found")
+        if case.tenant_id != getattr(request.state, "tenant_id", "system"):
+            raise HTTPException(status_code=404, detail="case not found")
+        return case
+
+    def _actor(request: Request) -> str:
+        principal = getattr(request.state, "principal", None)
+        return principal.username if principal is not None else "anonymous"
+
+    @app.get(
+        "/cases/{case_id}",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def get_case(case_id: str, request: Request) -> Dict[str, object]:
+        return _require_case_tenant(case_id, request).to_dict()
+
+    @app.patch(
+        "/cases/{case_id}",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def update_case(
+        case_id: str, payload: CaseUpdateRequest, request: Request
+    ) -> Dict[str, object]:
+        _require_case_tenant(case_id, request)
+        try:
+            case = case_manager.update(
+                case_id,
+                title=payload.title,
+                description=payload.description,
+                assignee=payload.assignee,
+                severity=payload.severity,
+            )
+        except CaseValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        _record_audit(
+            request, "case.update", "case", case_id, payload.model_dump()
+        )
+        return case.to_dict()
+
+    @app.post(
+        "/cases/{case_id}/transition",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def transition_case(
+        case_id: str, payload: CaseTransitionRequest, request: Request
+    ) -> Dict[str, object]:
+        case = _require_case_tenant(case_id, request)
+        try:
+            new_status = CaseStatus(payload.new_status)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid status")
+        previous = case.status.value
+        try:
+            updated = case_manager.transition(case_id, new_status)
+        except CaseError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        if payload.comment:
+            comment_manager.add(
+                case_id=case_id, author=_actor(request), body=payload.comment
+            )
+        _record_audit(
+            request,
+            "case.transition",
+            "case",
+            case_id,
+            {"from": previous, "to": new_status.value},
+        )
+        return updated.to_dict()
+
+    @app.post(
+        "/cases/{case_id}/comments",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def add_comment(
+        case_id: str, payload: CommentCreateRequest, request: Request
+    ) -> Dict[str, object]:
+        _require_case_tenant(case_id, request)
+        visibility = (
+            CommentVisibility(payload.visibility)
+            if payload.visibility in {"internal", "customer"}
+            else CommentVisibility.INTERNAL
+        )
+        try:
+            comment = comment_manager.add(
+                case_id=case_id,
+                author=_actor(request),
+                body=payload.body,
+                visibility=visibility,
+            )
+        except CommentError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        _record_audit(
+            request,
+            "case.comment.add",
+            "case",
+            case_id,
+            {"comment_id": comment.comment_id, "visibility": visibility.value},
+        )
+        return comment.to_dict()
+
+    @app.get(
+        "/cases/{case_id}/comments",
+        response_model=List[Dict[str, object]],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def list_comments(
+        case_id: str, request: Request
+    ) -> List[Dict[str, object]]:
+        _require_case_tenant(case_id, request)
+        return [c.to_dict() for c in comment_manager.list_for_case(case_id)]
+
+    @app.post(
+        "/cases/{case_id}/evidence",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def attach_evidence(
+        case_id: str, payload: EvidenceAttachRequest, request: Request
+    ) -> Dict[str, object]:
+        _require_case_tenant(case_id, request)
+        try:
+            kind = EvidenceKind(payload.kind)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid evidence kind")
+        try:
+            record = evidence_manager.attach(
+                case_id=case_id,
+                kind=kind,
+                source=payload.source,
+                storage_key=payload.storage_key,
+                metadata=payload.metadata,
+            )
+        except EvidenceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        _record_audit(
+            request,
+            "case.evidence.attach",
+            "case",
+            case_id,
+            {"evidence_id": record.evidence_id, "kind": kind.value},
+        )
+        return record.to_dict()
+
+    @app.get(
+        "/cases/{case_id}/evidence",
+        response_model=List[Dict[str, object]],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def list_evidence(
+        case_id: str, request: Request
+    ) -> List[Dict[str, object]]:
+        _require_case_tenant(case_id, request)
+        return [e.to_dict() for e in evidence_manager.list_for_case(case_id)]
+
+    @app.get(
+        "/cases/{case_id}/timeline",
+        response_model=List[Dict[str, object]],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def case_timeline(
+        case_id: str, request: Request
+    ) -> List[Dict[str, object]]:
+        tenant_id = getattr(request.state, "tenant_id", "system")
+        _require_case_tenant(case_id, request)
+        events: List[Dict[str, object]] = []
+        for row in audit_manager.list(tenant_id=tenant_id, limit=1000):
+            if row.get("target_id") == case_id:
+                events.append(
+                    {
+                        "ts": row.get("timestamp_utc", ""),
+                        "type": "audit",
+                        "actor": row.get("actor", ""),
+                        "action": row.get("action", ""),
+                        "detail": row.get("detail", ""),
+                    }
+                )
+        for c in comment_manager.list_for_case(case_id):
+            events.append(
+                {
+                    "ts": c.created_utc,
+                    "type": "comment",
+                    "actor": c.author,
+                    "body": c.body,
+                    "visibility": c.visibility.value,
+                }
+            )
+        for e in evidence_manager.list_for_case(case_id):
+            events.append(
+                {
+                    "ts": e.created_utc,
+                    "type": "evidence",
+                    "kind": e.kind.value,
+                    "source": e.source,
+                }
+            )
+        events.sort(key=lambda ev: str(ev.get("ts", "")))
+        return events
+
+    # ------------------------------------------------------------------
     # Quarantine
     # ------------------------------------------------------------------
 
@@ -569,6 +846,96 @@ def create_app() -> FastAPI:
             r.to_dict()
             for r in quarantine_manager.list_for_tenant(tenant_id)
         ]
+
+    # ------------------------------------------------------------------
+    # Quarantine workflow (get / release / delete / preview)
+    # ------------------------------------------------------------------
+
+    def _require_quarantine_tenant(qid: str, request: Request):
+        try:
+            record = quarantine_manager.get(qid)
+        except MessageNotFoundError:
+            raise HTTPException(status_code=404, detail="quarantine item not found")
+        if record.tenant_id != getattr(request.state, "tenant_id", "system"):
+            raise HTTPException(status_code=404, detail="quarantine item not found")
+        return record
+
+    @app.get(
+        "/quarantine/{qid}",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def get_quarantine(qid: str, request: Request) -> Dict[str, object]:
+        return _require_quarantine_tenant(qid, request).to_dict()
+
+    @app.post(
+        "/quarantine/{qid}/release",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def release_quarantine(
+        qid: str, payload: QuarantineActionRequest, request: Request
+    ) -> Dict[str, object]:
+        _require_quarantine_tenant(qid, request)
+        try:
+            record = quarantine_manager.release(qid)
+        except InvalidTransitionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        _record_audit(
+            request,
+            "quarantine.release",
+            "quarantine",
+            qid,
+            {"reason": payload.reason},
+        )
+        return record.to_dict()
+
+    @app.post(
+        "/quarantine/{qid}/delete",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
+    async def delete_quarantine(
+        qid: str, payload: QuarantineActionRequest, request: Request
+    ) -> Dict[str, object]:
+        _require_quarantine_tenant(qid, request)
+        try:
+            record = quarantine_manager.delete(qid)
+        except InvalidTransitionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        _record_audit(
+            request,
+            "quarantine.delete",
+            "quarantine",
+            qid,
+            {"reason": payload.reason},
+        )
+        return record.to_dict()
+
+    @app.get(
+        "/quarantine/{qid}/preview",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
+    async def preview_quarantine(
+        qid: str, request: Request
+    ) -> Dict[str, object]:
+        _require_quarantine_tenant(qid, request)
+        body = quarantine_manager.read_body(qid)
+        text = body.decode("utf-8", errors="replace")
+        _record_audit(
+            request,
+            "quarantine.preview",
+            "quarantine",
+            qid,
+            {"bytes": len(body)},
+        )
+        return {
+            "quarantine_id": qid,
+            "body": text,
+            "decoded": True,
+            "note": "Sensitive content read; access is logged.",
+        }
 
     # ------------------------------------------------------------------
     # Alerts (read-only summary)

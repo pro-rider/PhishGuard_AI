@@ -72,11 +72,27 @@ class CaseEvidence:
 
 
 class EvidenceManager:
-    """Thread-safe in-memory evidence store."""
+    """Thread-safe evidence store with an optional durable backend."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, db_path: Optional[str] = None) -> None:
         self._lock = threading.RLock()
         self._records: Dict[str, CaseEvidence] = {}
+        if db_path:
+            from storage.repository import SqlAlchemyStore
+
+            self._store = SqlAlchemyStore(db_path)
+            for _eid, data in self._store.load_all("case_evidence"):
+                try:
+                    data["kind"] = EvidenceKind(data["kind"])
+                    self._records[_eid] = CaseEvidence(**data)
+                except Exception:  # noqa: BLE001 - skip corrupt row
+                    continue
+        else:
+            self._store = None
+
+    def _persist(self, record: CaseEvidence) -> None:
+        if self._store is not None:
+            self._store.upsert("case_evidence", record.evidence_id, record.to_dict())
 
     def attach(
         self,
@@ -108,6 +124,7 @@ class EvidenceManager:
                 metadata=self._sanitize_metadata(metadata),
             )
             self._records[record.evidence_id] = record
+        self._persist(record)
         return record
 
     def list_for_case(self, case_id: str) -> List[CaseEvidence]:
@@ -127,7 +144,13 @@ class EvidenceManager:
 
     def delete(self, evidence_id: str) -> bool:
         with self._lock:
-            return self._records.pop(evidence_id, None) is not None
+            removed = self._records.pop(evidence_id, None) is not None
+        if removed and self._store is not None:
+            try:
+                self._store.delete_record("case_evidence", evidence_id)
+            except Exception:  # noqa: BLE001
+                pass
+        return removed
 
     @staticmethod
     def _bound(value: str, limit: int, name: str, *, required: bool) -> str:

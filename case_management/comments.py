@@ -66,11 +66,32 @@ class CaseComment:
 
 
 class CommentManager:
-    """Thread-safe in-memory comment store."""
+    """Thread-safe comment store with an optional durable backend.
 
-    def __init__(self) -> None:
+    When ``db_path`` is supplied, comments are written through to SQLAlchemy
+    (SQLite by default, PostgreSQL when ``SQLALCHEMY_DATABASE_URI`` is set) and
+    reloaded on startup so they survive restarts.
+    """
+
+    def __init__(self, *, db_path: Optional[str] = None) -> None:
         self._lock = threading.RLock()
         self._comments: Dict[str, CaseComment] = {}
+        if db_path:
+            from storage.repository import SqlAlchemyStore
+
+            self._store = SqlAlchemyStore(db_path)
+            for _cid, data in self._store.load_all("case_comments"):
+                try:
+                    data["visibility"] = CommentVisibility(data["visibility"])
+                    self._comments[_cid] = CaseComment(**data)
+                except Exception:  # noqa: BLE001 - skip corrupt row
+                    continue
+        else:
+            self._store = None
+
+    def _persist(self, comment: CaseComment) -> None:
+        if self._store is not None:
+            self._store.upsert("case_comments", comment.comment_id, comment.to_dict())
 
     def add(
         self,
@@ -98,6 +119,7 @@ class CommentManager:
                 visibility=visibility,
             )
             self._comments[comment.comment_id] = comment
+        self._persist(comment)
         return comment
 
     def list_for_case(self, case_id: str) -> List[CaseComment]:
@@ -117,7 +139,13 @@ class CommentManager:
 
     def delete(self, comment_id: str) -> bool:
         with self._lock:
-            return self._comments.pop(comment_id, None) is not None
+            removed = self._comments.pop(comment_id, None) is not None
+        if removed and self._store is not None:
+            try:
+                self._store.delete_record("case_comments", comment_id)
+            except Exception:  # noqa: BLE001
+                pass
+        return removed
 
     @staticmethod
     def _bound(value: str, limit: int, name: str, *, required: bool) -> str:

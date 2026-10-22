@@ -235,6 +235,7 @@ class CaseManager:
             data["assignee"] = self._bound(assignee, 128, "assignee")
         if severity is not None:
             data["severity"] = self._bound(severity, 16, "severity", required=True)
+        data["status"] = CaseStatus(data["status"])
         data["updated_utc"] = self._now()
         updated = SecurityCase(**data)
         with self._lock:

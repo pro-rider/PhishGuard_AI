@@ -56,8 +56,27 @@ class MetaRecord(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class CaseCommentRecord(Base):
+    __tablename__ = "case_comments"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CaseEvidenceRecord(Base):
+    __tablename__ = "case_evidence"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 # Tables managed through the generic (id, data) store interface.
-DATA_TABLES = ("cases", "quarantine", "scan_jobs", "audit_log")
+DATA_TABLES = (
+    "cases",
+    "quarantine",
+    "scan_jobs",
+    "audit_log",
+    "case_comments",
+    "case_evidence",
+)
 
 
 __all__ = [
@@ -67,5 +86,7 @@ __all__ = [
     "ScanJobRecord",
     "AuditLogRecord",
     "MetaRecord",
+    "CaseCommentRecord",
+    "CaseEvidenceRecord",
     "DATA_TABLES",
 ]

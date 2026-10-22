@@ -68,8 +68,15 @@ Public/exempt endpoints (always open): `/`, `/dashboard`, `/health`, `/ready`, `
 | `GET /scan/jobs/{id}/events` | ✓ | ✓ | ✓ |
 | `POST /cases` | ✓ | ✓ | — |
 | `GET /cases` | ✓ | ✓ | ✓ |
+| `GET /cases/{id}` · `PATCH /cases/{id}` | ✓ | ✓ | read-only ✓ |
+| `POST /cases/{id}/transition` | ✓ | ✓ | — |
+| `POST /cases/{id}/comments` · `GET /cases/{id}/comments` | ✓ | ✓ | read ✓ |
+| `POST /cases/{id}/evidence` · `GET /cases/{id}/evidence` | ✓ | ✓ | read ✓ |
+| `GET /cases/{id}/timeline` | ✓ | ✓ | ✓ |
 | `POST /quarantine` | ✓ | ✓ | — |
 | `GET /quarantine` | ✓ | ✓ | ✓ |
+| `GET /quarantine/{id}` · `GET /quarantine/{id}/preview` | ✓ | ✓ | ✓ |
+| `POST /quarantine/{id}/release` · `POST /quarantine/{id}/delete` | ✓ | ✓ | — |
 | `GET /alerts/severities` | ✓ | ✓ | ✓ |
 | `GET /audit` | ✓ | ✓ | ✓ |
 
@@ -227,11 +234,32 @@ Create an incident case. Body: `{ "title", "description", "severity", "assignee"
 ### `GET /cases?status=<status>`
 List cases. `status` ∈ `open | in_progress | on_hold | resolved | closed | archived`.
 
+### `GET /cases/{case_id}` · `PATCH /cases/{case_id}`
+Fetch one case / update its editable fields (`title`, `description`, `assignee`, `severity`).
+
+### `POST /cases/{case_id}/transition`
+Status transition. Body: `{ "new_status", "comment?" }`. Transitioned per the workflow
+state machine; an illegal move returns `409`. A transition comment is stored if provided.
+
+### `POST /cases/{case_id}/comments` · `GET /cases/{case_id}/comments`
+Add / list case comments. Add body: `{ "body", "visibility": "internal|customer" }`.
+
+### `POST /cases/{case_id}/evidence` · `GET /cases/{case_id}/evidence`
+Attach / list evidence references. Attach body: `{ "kind", "source", "storage_key", "metadata?" }`;
+`kind` ∈ `ioc | finding | attachment | report | log`.
+
+### `GET /cases/{case_id}/timeline`
+Chronological activity timeline for a case (audit events + comments + evidence).
+
 ### `POST /quarantine`
 Quarantine a message. Body: `{ "message_id", "body", "risk_score" }`.
 
 ### `GET /quarantine`
 List the quarantine queue.
+
+### `GET /quarantine/{qid}` · `POST /quarantine/{qid}/release` · `POST /quarantine/{qid}/delete` · `GET /quarantine/{qid}/preview`
+Fetch an item; release / delete it (with an optional `reason`, audited, `409` on illegal
+transition); preview the decrypted body (sensitive read — access is logged).
 
 ### `GET /alerts/severities`
 Return the recognized severity scale.
@@ -242,7 +270,7 @@ Return the recognized severity scale.
 
 - **Default:** SQLite via SQLAlchemy at `storage/data/phishguard.db` (gitignored). Set `PHISHGUARD_DB` to relocate.
 - **PostgreSQL:** set `SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://user:pass@host/db` (add the driver) — the app and migrations automatically target it.
-- **Migrations:** `python -m alembic upgrade head` (see `alembic.ini` / `migrations/`). Existing databases stay compatible (same `id`/`data` table layout).
+- **Migrations:** `python -m alembic upgrade head` (see `alembic.ini` / `migrations/`). Existing databases stay compatible (same `id`/`data` table layout). Tables: `cases`, `quarantine`, `scan_jobs`, `audit_log`, `case_comments`, `case_evidence`, `meta` (case comments + evidence are now durable too).
 
 ## 7. Tests
 
@@ -250,7 +278,7 @@ Return the recognized severity scale.
 python tests/integration/test_api.py
 ```
 
-Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, and the audit trail against a throwaway SQLite DB.
+Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, quarantine, the audit trail, and the full case/quarantine **workflow** (transition/comments/evidence/timeline/release/delete/preview) against a throwaway SQLite DB.
 
 ---
 
@@ -289,7 +317,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
 - **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
 - Email analyzers are fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap); the composite heuristic uses bounded heuristics on that snippet.
-- **Persistence:** cases + quarantine + the quarantine encryption key survive restarts via SQLAlchemy (SQLite default; PostgreSQL via `SQLALCHEMY_DATABASE_URI` + Alembic migrations). Key management still dev-grade (persisted key) — see roadmap for Vault/KMS.
+- **Persistence:** cases + quarantine + comments + evidence + the quarantine encryption key survive restarts via SQLAlchemy (SQLite default; PostgreSQL via `SQLALCHEMY_DATABASE_URI` + Alembic migrations). Key management still dev-grade (persisted key) — see roadmap for Vault/KMS.
 
 ---
 
