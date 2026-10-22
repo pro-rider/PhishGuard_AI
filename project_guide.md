@@ -41,16 +41,47 @@ pip install -r requirements-ml.txt
 
 ## 2. Authentication Modes
 
-The auth guard (`api_gateway/middleware/auth_guard.py`) has two modes:
+The auth guard (`api_gateway/middleware/auth_guard.py`) resolves a caller to a **principal** (identity + roles + tenant) from either a Bearer JWT or a static API key, then role-based access control (`security/rbac.py`'s `require_roles`) enforces Admin / Analyst / Viewer per route.
 
 | Mode | When | Behavior |
 |------|------|----------|
-| **Open** (default for dev) | No `API_KEYS` configured | All endpoints accessible without a key |
-| **Enforced** | `API_KEYS` set (comma-separated) | Non-exempt endpoints require `X-API-Key` or `Authorization: Bearer <key>` |
+| **Open** (default for dev) | No `API_KEYS`, no `AUTH_USERS` | All endpoints accessible; no principal attached |
+| **API-key** | `API_KEYS` set | Non-exempt endpoints require `X-API-Key` (or `Authorization: Bearer <key>`). Plain keys grant `analyst`; use `key\|role1,role2\|tenant` for finer control |
+| **JWT + RBAC** | `AUTH_USERS` set | `POST /auth/token` exchanges credentials for an HS256 JWT carrying roles + tenant; protected routes enforce roles |
 
-Public/exempt endpoints (always open): `/`, `/dashboard`, `/health`, `/ready`, `/metrics`, `/docs`, `/openapi.json`.
+Public/exempt endpoints (always open): `/`, `/dashboard`, `/health`, `/ready`, `/metrics`, `/docs`, `/openapi.json`, `/auth/token`.
 
-To enable auth for a deployment:
+### Role matrix
+
+| Route | admin | analyst | viewer |
+|-------|:-----:|:-------:|:------:|
+| `POST /scan` | ✓ | ✓ | — |
+| `POST /cases` | ✓ | ✓ | — |
+| `GET /cases` | ✓ | ✓ | ✓ |
+| `POST /quarantine` | ✓ | ✓ | — |
+| `GET /quarantine` | ✓ | ✓ | ✓ |
+| `GET /alerts/severities` | ✓ | ✓ | ✓ |
+
+### Enabling JWT + RBAC
+
+`AUTH_USERS` is a `;`-separated list of `username:password:role1,role2:tenant`:
+
+```powershell
+$env:AUTH_USERS = "admin:ChangeMe#1:admin:system;analyst:ChangeMe#2:analyst:system;viewer:ChangeMe#3:viewer:system"
+$env:SECRET_KEY   = "a-long-random-secret-at-least-32-chars"
+uvicorn api_gateway.main:app
+```
+
+Get a token:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/auth/token -H "Content-Type: application/json" `
+  -d '{"username":"analyst","password":"ChangeMe#2"}'
+```
+
+Use it: `Authorization: Bearer <access_token>`. Tokens expire per `ACCESS_TOKEN_EXPIRE_MINUTES` (default 30).
+
+### Enabling API-key mode
 
 ```powershell
 $env:API_KEYS = "key-a,key-b"

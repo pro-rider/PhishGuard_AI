@@ -13,7 +13,7 @@ with status, feasibility, and a practical execution order.
 |---|---|---|---|
 | Persistence (cases/quarantine) | ✅ **done (SQLite)** | Was in-memory; `database/` was empty. Added `storage/persistence.py` (write-through SQLite) wired into `CaseManager` + `EmailQuarantineManager`; records **and** the quarantine encryption key survive restart. | Next: PostgreSQL + SQLAlchemy/Alembic for real deployments |
 | Key management | 🟡 | Auto-provisioned AES-GCM key, now persisted to SQLite meta (dev-grade). | Vault / KMS / Key Vault + rotation |
-| Authentication | 🟡 | Simple API key; **open mode** when `API_KEYS` unset. Middleware exists (`AuthGuardMiddleware`). | JWT + roles (Admin/Analyst/Viewer) + optional OIDC |
+| Authentication | ✅ **done (JWT + RBAC)** | Simple API key; **open mode** when `API_KEYS` unset. Middleware exists (`AuthGuardMiddleware`). | Now: JWT (HS256) via `POST /auth/token` + roles Admin/Analyst/Viewer + tenant scope. Next: OIDC / SSO. |
 | Rate limiting | 🟡 | `RateLimiterMiddleware` exists (in-memory). | Redis-backed + per-tenant quotas |
 | Observability | 🟡 | `observability/metrics.py`, `tracing.py`, `alerting.py` exist. | Wire OpenTelemetry → Prometheus/Grafana |
 | SSRF & input safety | 🟡 | `SSRFGuard` used by network-bound analyzers. | Expand allow/deny lists, normalization, sandbox timeouts |
@@ -62,7 +62,7 @@ with status, feasibility, and a practical execution order.
 
 1. ✅ **Persistence (SQLite)** — done this session (biggest risk reduction).
 2. **PostgreSQL + Alembic** swap (replace SQLite adapter, keep same interface).
-3. **Auth hardening** — JWT + RBAC (Admin/Analyst/Viewer), keep open mode for dev.
+3. ✅ **Auth hardening** — JWT + RBAC (Admin/Analyst/Viewer), keep open mode for dev.
 4. **Wire more analyzers** — register offline-safe ones (URLParser, DomainAnalyzer typosquat/entropy, BodyAnalyzer with MIME support) now that they import.
 5. **Observability** — `/metrics` endpoint + OTel traces, dashboard latency/error tiles.
 6. **Async scans** — Celery + Redis for long scans with SSE progress.
@@ -81,5 +81,7 @@ with status, feasibility, and a practical execution order.
 - `api_gateway/main.py` — `DB_PATH` (env-overridable), managers now persistent.
 - `engine/orchestrator.py` — added `COMPUTE`/`NETWORK_IO`/`DOMAIN` enum members + dispatcher routing; all bundled analyzers import again.
 - `.gitignore` — `storage/data/` added.
+- **JWT + RBAC auth** — `security/identity.py` (Principal, PBKDF2 password hashing, stdlib HS256 JWT), `security/rbac.py` (`require_roles` dependency), `api_gateway/middleware/auth_guard.py` (resolves principals from Bearer JWT or `X-API-Key`, open mode preserved), `settings.AUTH_USERS`, and `POST /auth/token`.
 
 Verified: cases + quarantine + encrypted bodies survive a full process restart.
+Verified auth: open mode (no creds) passes; JWT admin → `/scan` 200; viewer → `GET /cases` 200 / `POST /cases` 403; no creds → 401; wrong password → 401.

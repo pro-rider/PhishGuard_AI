@@ -20,12 +20,15 @@ import os
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from api_gateway.middleware.auth_guard import AuthGuardMiddleware
+from api_gateway.middleware.auth_guard import (
+    AuthGuardMiddleware,
+    build_identity_store,
+)
 from api_gateway.middleware.correlation_id import CorrelationIdMiddleware
 from api_gateway.middleware.rate_limiter import RateLimiterMiddleware
 from api_gateway.middleware.tenant_isolation import TenantIsolationMiddleware
@@ -47,6 +50,7 @@ from quarantine.email_quarantine import (
     EmailQuarantineManager,
     QuarantineStatus,
 )
+from security.rbac import require_roles
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +114,15 @@ class QuarantineRequest(BaseModel):
     message_id: str = Field(min_length=1, max_length=128)
     body: str = Field(default="", max_length=MAX_TEXT_LENGTH)
     risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class AuthTokenRequest(BaseModel):
+    """Body for exchanging credentials for a JWT (enabled via AUTH_USERS)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=512)
 
 
 # ============================================================================
@@ -190,10 +203,42 @@ def create_app() -> FastAPI:
         return {"status": "ready"}
 
     # ------------------------------------------------------------------
+    # Authentication (JWT token issuance)
+    # ------------------------------------------------------------------
+
+    @app.post("/auth/token", response_model=Dict[str, object])
+    async def auth_token(payload: AuthTokenRequest) -> Dict[str, object]:
+        """Exchange username/password for a JWT when AUTH_USERS is configured.
+
+        Returns an access token carrying the caller's roles + tenant scope. In
+        open mode (no AUTH_USERS) this returns 401 so callers fall back to the
+        unauthenticated endpoints.
+        """
+        identity = build_identity_store()
+        if identity is None:
+            raise HTTPException(status_code=401, detail="auth not configured")
+        principal = identity.authenticate(payload.username, payload.password)
+        if principal is None:
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        token = identity.issue_token(principal)
+        ttl = getattr(identity, "_ttl", 1800)
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": ttl,
+            "roles": sorted(principal.roles),
+            "tenant": principal.tenant,
+        }
+
+    # ------------------------------------------------------------------
     # Detection
     # ------------------------------------------------------------------
 
-    @app.post("/scan", response_model=Dict[str, Any])
+    @app.post(
+        "/scan",
+        response_model=Dict[str, Any],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
     async def scan(payload: ScanRequest, request: Request) -> Dict[str, Any]:
         tenant_id = getattr(request.state, "tenant_id", "system")
         correlation_id = getattr(request.state, "correlation_id", None)
@@ -237,7 +282,11 @@ def create_app() -> FastAPI:
     # Cases
     # ------------------------------------------------------------------
 
-    @app.post("/cases", response_model=Dict[str, object])
+    @app.post(
+        "/cases",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
     async def create_case(payload: CaseCreateRequest, request: Request) -> Dict[str, object]:
         tenant_id = getattr(request.state, "tenant_id", "system")
         case: SecurityCase = case_manager.create(
@@ -249,7 +298,11 @@ def create_app() -> FastAPI:
         )
         return case.to_dict()
 
-    @app.get("/cases", response_model=List[Dict[str, object]])
+    @app.get(
+        "/cases",
+        response_model=List[Dict[str, object]],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
     async def list_cases(
         request: Request, status: Optional[str] = None
     ) -> List[Dict[str, object]]:
@@ -266,7 +319,11 @@ def create_app() -> FastAPI:
     # Quarantine
     # ------------------------------------------------------------------
 
-    @app.post("/quarantine", response_model=Dict[str, object])
+    @app.post(
+        "/quarantine",
+        response_model=Dict[str, object],
+        dependencies=[Depends(require_roles("admin", "analyst"))],
+    )
     async def quarantine_message(
         payload: QuarantineRequest, request: Request
     ) -> Dict[str, object]:
@@ -279,7 +336,11 @@ def create_app() -> FastAPI:
         )
         return record.to_dict()
 
-    @app.get("/quarantine", response_model=List[Dict[str, object]])
+    @app.get(
+        "/quarantine",
+        response_model=List[Dict[str, object]],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
     async def list_quarantine(request: Request) -> List[Dict[str, object]]:
         tenant_id = getattr(request.state, "tenant_id", "system")
         return [
@@ -291,7 +352,11 @@ def create_app() -> FastAPI:
     # Alerts (read-only summary)
     # ------------------------------------------------------------------
 
-    @app.get("/alerts/severities", response_model=Dict[str, str])
+    @app.get(
+        "/alerts/severities",
+        response_model=Dict[str, str],
+        dependencies=[Depends(require_roles("admin", "analyst", "viewer"))],
+    )
     async def alert_severities() -> Dict[str, str]:
         return {s.value: s.value for s in AlertSeverity}
 

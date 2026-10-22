@@ -328,6 +328,15 @@ class Settings(BaseSettings):
         description="Comma-separated API keys accepted by the auth guard.",
     )
 
+    # Optional: comma-separated entries of "username:password:role1,role2:tenant"
+    # (entries separated by ';'). When set, JWT auth via POST /auth/token is
+    # enabled and principals carry roles (admin/analyst/viewer) + a tenant scope.
+    # Leave unset to keep open mode (no auth) alongside the static API keys.
+    AUTH_USERS: str | None = Field(
+        default=None,
+        description="Semicolon-separated user registry enabling JWT + RBAC.",
+    )
+
     # ========================================================================
     # SSRF / OUTBOUND NETWORK SECURITY
     # ========================================================================
