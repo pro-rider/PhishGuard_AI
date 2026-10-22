@@ -143,9 +143,91 @@ PhishGuard_AI/
 └── requirements*.txt
 ```
 
+### 3.1 Module responsibilities (whole-project map)
+
+| Package | What it owns | Key files |
+|---------|--------------|-----------|
+| `api_gateway/` | The FastAPI application: route wiring, middleware chain, request models, auth guard, all HTTP endpoints (scan, async jobs, cases, quarantine, alerts, audit, auth). | `main.py`, `middleware/` |
+| `engine/` | The detection orchestrator + analyzer framework (score aggregation, verdict, deadlines, fail-closed). | `orchestrator.py`, `analyzers/` |
+| `engine/analyzers/email/` | Offline email analyzers: **`header_analyzer`** (SPF/DKIM/DMARC + Reply-To/display-name spoofing — **registered**), plus `body_analyzer`, `nlp_detector`, `attachment_detector` (available, not yet registered). | `header_analyzer.py`, `body_analyzer.py` |
+| `engine/analyzers/url/` | URL analysis; `url_parser` is feature-flagged via `ENABLE_EXTRA_ANALYZERS`. | `url_parser.py` |
+| `ioc/` | Indicator extraction from text/URLs (domains, IPs, hashes). | — |
+| `policy/` | Risk thresholds, verdict mapping, per-tenant policy. | — |
+| `quarantine/` | Quarantine manager: encrypted-at-rest storage, release/delete/preview, retention. | `email_quarantine.py` |
+| `case_management/` | Incident workflow: cases, comments, evidence, status state machine, timeline. | `cases.py`, `comments.py`, `evidence.py`, `workflow.py` |
+| `security/` | SSRF guard, identity (JWT + PBKDF2), RBAC (`require_roles`). | `ssrf_guard.py`, `identity.py`, `rbac.py` |
+| `storage/` | Durable persistence: SQLAlchemy engine, ORM models, repository adapter, scan-job manager, audit, AES-GCM encryption. | `database.py`, `models.py`, `repository.py`, `scan_jobs.py`, `audit.py`, `encryption.py` |
+| `observability/` | Prometheus metrics, alerting, tracing, structured logging. | `metrics.py`, `alerting.py` |
+| `messaging/` | Celery app (scaffold for scale-out job execution). | — |
+| `reputation/` | Threat-intel reputation lookups (IP, hash). | — |
+| `sandbox/` | Attachment sandboxing & malware analysis. | — |
+| `ml_inference/` / `mlops_pipeline/` | ML feature extraction / training & evaluation (independent research subtree). | — |
+| `config/internal/` | Hardened pydantic-settings (fail-closed, secret enforcement). | `settings.py` |
+| `frontend/` | Single-file operator dashboard served at `/`. | `operator-dashboard.html` |
+
 ---
 
-## 4. Operator Dashboard
+## 4. Detection Pipeline & Scoring
+
+How an input becomes a verdict. The orchestrator (`engine/orchestrator.py`) runs
+registered analyzers against a `ScanContext` and aggregates their results.
+
+### 4.1 Flow
+
+```
+POST /scan (email_text / email_headers / target_url / filename)
+  → ScanContext(scan_type=COMPREHENSIVE, email_payload, metadata, feature toggles)
+  → orchestrator.run_scan(context)
+      1. Each registered analyzer runs concurrently under a deadline (monotonic).
+      2. _aggregate_results sums only SUCCESS analyzers:
+           overall_score   = Σ (score_contribution × confidence) / Σ confidence
+           confidence_score = Σ confidence / N
+      3. Verdict derived from overall_score via policy thresholds
+         (INFORMATIONAL → LOW → MEDIUM → HIGH → CRITICAL).
+      4. Result carries `signals` (top contributing analyzers + their findings)
+         for explainability.
+  → if result.is_malicious (HIGH/CRITICAL): auto-create a case (idempotent per scan_id)
+  → respond { scan_id, execution_state, overall_score, confidence_score, verdict,
+             case_created, signals }
+```
+
+### 4.2 Analyzer execution states (graceful degradation)
+
+| State | Meaning | Effect on score |
+|-------|---------|-----------------|
+| `SUCCESS` | Ran and returned findings | Contributes `score × confidence` to the weighted sum |
+| `INVALID_INPUT` | Analyzer skipped (e.g. no headers supplied to `header_analyzer`) | Contributes nothing; never fails the scan |
+| `SKIPPED` | Disabled / missing external engine | Contributes nothing |
+| `TIMEOUT` / `FAILED` | Deadline hit / exception (sanitized) | Contributes nothing; captured as an error |
+
+`fail_closed_on_total_failure` is on: if **no** analyzer succeeds, the scan is `FAILED`
+rather than a clean `INFORMATIONAL` — a skipped analyzer can never produce a false "clean".
+
+### 4.3 Registered analyzers
+
+Registered by default in `api_gateway/main.py::create_app`:
+
+| Analyzer | Reads | Emits |
+|----------|-------|-------|
+| `nlp_detector` | plain-text `email_text` | keyword/urgency/credential-bait signals |
+| `heuristic_analyzer` | plain-text `email_text` | bounded heuristic rules (urgency, credential bait, …) |
+| `header_analyzer` | full `email_headers` (RFC 5322) | SPF/DKIM/DMARC alignment, `Reply-To` vs `From` mismatch, display-name / Return-Path spoofing (e.g. HIGH `EMAIL.ALIGNMENT.REPLY_TO_MISMATCH`) |
+
+`ENABLE_EXTRA_ANALYZERS=true` additionally registers offline extras (e.g. `url_parser`);
+this changes weighted aggregation, so re-baseline verdicts on your corpus first. Other
+bundled analyzers (body, attachment, web-content, visual-similarity) are **not** registered
+because they need external engines (browser, live DNS/SSL, YARA rulesets) that could
+otherwise risk fail-closed verdicts.
+
+### 4.4 Auto-case escalation
+
+A scan whose verdict is `HIGH` or `CRITICAL` automatically creates an incident case
+(idempotent per `scan_id`), so confirmed threats appear on the dashboard's Cases view
+without manual triage.
+
+---
+
+## 5. Operator Dashboard
 
 `frontend/operator-dashboard.html` — a single-file, self-contained dashboard served by the API at **`/`**.
 
@@ -155,7 +237,7 @@ It talks to the live API: when served by the server it auto-uses the same origin
 
 ---
 
-## 5. API Reference
+## 6. API Reference
 
 ### `POST /scan`
 Run a detection scan.
@@ -274,13 +356,13 @@ Return the recognized severity scale.
 
 ---
 
-## 6. Persistence
+## 7. Persistence
 
 - **Default:** SQLite via SQLAlchemy at `storage/data/phishguard.db` (gitignored). Set `PHISHGUARD_DB` to relocate.
 - **PostgreSQL:** set `SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://user:pass@host/db` (add the driver) — the app and migrations automatically target it.
 - **Migrations:** `python -m alembic upgrade head` (see `alembic.ini` / `migrations/`). Existing databases stay compatible (same `id`/`data` table layout). Tables: `cases`, `quarantine`, `scan_jobs`, `audit_log`, `case_comments`, `case_evidence`, `meta` (case comments + evidence are now durable too).
 
-## 7. Tests
+## 8. Tests
 
 ```powershell
 python tests/integration/test_api.py
@@ -290,7 +372,7 @@ Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, quarantine, the a
 
 ---
 
-## 8. CI/CD (GitHub Actions)
+## 9. CI/CD (GitHub Actions)
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request:
 
@@ -301,6 +383,7 @@ Covers readiness, JWT+RBAC, sync scan, async job + SSE, cases, quarantine, the a
 | Security | `bandit -r <core dirs> -lll` | Any **HIGH** severity finding |
 | Deps | `pip-audit -r requirements-ci.txt` | Any known vulnerability in the CI dependency set |
 | Unit | `python tests/unit/test_auth_security.py` | Auth / security-posture regression |
+| Header | `python tests/unit/test_header_analyzer.py` | Email header analyzer (spoofing / alignment) regression |
 | Integration | `python tests/integration/test_api.py` | Any end-to-end API regression |
 
 CI installs `requirements-ci.txt` — the *tested core runtime* — not the aspirational
@@ -308,10 +391,17 @@ CI installs `requirements-ci.txt` — the *tested core runtime* — not the aspi
 the core runtime was moved to `fastapi>=0.159` / `starlette>=1.9`, resolving the
 starlette 0.46.x CVE set that `pip-audit` was flagging.
 
-## 9. Unit Tests & Syntax Check
+## 10. Unit Tests & Syntax Check
 
 ```powershell
 .\venv\Scripts\python.exe -m pytest tests/unit -q
+```
+
+The two standalone unit suites can also be run directly:
+
+```powershell
+.\venv\Scripts\python.exe tests\unit\test_auth_security.py
+.\venv\Scripts\python.exe tests\unit\test_header_analyzer.py
 ```
 
 A `compileall` over the whole tree is a quick syntax gate:
@@ -322,7 +412,7 @@ A `compileall` over the whole tree is a quick syntax gate:
 
 ---
 
-## 10. Configuration
+## 11. Configuration
 
 Settings live in `config/internal/settings.py` (pydantic-settings). Override via environment variables or a `.env` file (see `.env.example`).
 
@@ -330,7 +420,7 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 11. Security Notes
+## 12. Security Notes
 
 - **SSRF guard** (`security/ssrf_guard.py`): blocks private/link-local/loopback targets by default; DNS-based resolution may reject benchmark IPs (normal).
 - **Encryption at rest** (`storage/encryption.py`): AES-GCM keyring. The quarantine manager auto-provisions an in-process active key so it works out of the box; bring your own key manager for persistence.
@@ -338,16 +428,17 @@ Highlights: `API_KEYS`, `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_API_
 
 ---
 
-## 12. Known Limitations & Roadmap
+## 13. Known Limitations & Roadmap
 
 - **Analyzers are now registered (default set).** `api_gateway/main.py` registers `NLPDetectorAnalyzer` + `HeuristicContentAnalyzer` (offline-safe, operate on the plain-text email / URL the gateway receives). `/scan` now returns real verdicts (HIGH/CRITICAL reachable), and a HIGH/CRITICAL scan **auto-creates a case** (idempotent per `scan_id`). Verified end-to-end: phishing email → `CRITICAL` + case; benign email → `INFORMATIONAL`, no case.
 - **Bundled analyzers now import.** Fixed missing enum members (`AnalyzerResourceClass.COMPUTE` / `NETWORK_IO`, `ScanType.DOMAIN`) — all previously-crashing modules load. They are **not yet registered** because they need external engines (browser, live DNS/SSL, yara rulesets) that would risk fail-closed verdicts. See `docs/improvement_plan.md`.
 - The email **body** analyzers are still fed only the first 1024 chars of `email_text` (the `ConstrainedMetadata` value cap). The **header** analyzer, by contrast, consumes the full `email_headers` block (up to 256 KB) supplied via `/scan`, so header-level spoofing/alignment signals are not truncated.
 - **Persistence:** cases + quarantine + comments + evidence + the quarantine encryption key survive restarts via SQLAlchemy (SQLite default; PostgreSQL via `SQLALCHEMY_DATABASE_URI` + Alembic migrations). Key management still dev-grade (persisted key) — see roadmap for Vault/KMS.
+- **Full roadmap:** the prioritized production roadmap (P0 detection hardening → P1 analyst workflow → P2 enterprise/platform), the "honest remaining" list (Vault/KMS encryption, Postgres RLS, Celery/Redis jobs, MIME body analyzers, threat-intel feeds, eval harness, SSRF pinning, gunicorn + Redis rate limiting, SPA/CSP dashboard, API versioning, mypy, Trivy), and every delivery round is tracked in **`docs/improvement_plan.md`**.
 
 ---
 
-## 13. Git Workflow
+## 14. Git Workflow
 
 ```powershell
 git add -A
@@ -359,12 +450,12 @@ Repo: `https://github.com/pro-rider/PhishGuard_AI`
 
 ---
 
-## 14. Maintenance & Operations Guide
+## 15. Maintenance & Operations Guide
 
 How to keep PhishGuard_AI running, upgrading, and safe. Read this before changing
 schema, auth, analyzers, or endpoints.
 
-### 13.1 Daily operations (quick reference)
+### 15.1 Daily operations (quick reference)
 
 ```powershell
 # Run the dev server (open mode, hot-reload, :8000)
@@ -377,14 +468,14 @@ python tests\integration\test_api.py
 # Syntax gate over all source
 python -m compileall -q api_gateway config case_management quarantine storage engine security tests
 
-# Apply database migrations (see 13.3)
+# Apply database migrations (see 15.3)
 python -m alembic upgrade head
 ```
 
 Key URLs: dashboard `/` · API docs `/docs` · health `/health` · readiness `/ready`
 (check actually queries the DB).
 
-### 13.2 Runtime configuration
+### 15.2 Runtime configuration
 
 Settings live in `config/internal/settings.py` (pydantic-settings). Override with
 environment variables or `.env`. The most important knobs:
@@ -402,7 +493,7 @@ environment variables or `.env`. The most important knobs:
 | `DEV_INSECURE` | Default `False`. **Fail-closed**: open mode, dev `SECRET_KEY`, and `/docs` are refused unless `true` (local dev, localhost only). `run_server.ps1` sets it. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT lifetime (default 30). `/auth/token` also enforces a failed-login lockout (5 failures / 15 min). |
 
-### 13.3 Database maintenance
+### 15.3 Database maintenance
 
 **Default (SQLite)** — no setup. DB file: `storage/data/phishguard.db` (gitignored).
 Stop the server before deleting it to start clean.
@@ -427,7 +518,7 @@ python -m alembic upgrade head
 **Backups:** the SQLite file is the whole data set — back it up (or the Postgres DB +
 object storage) on a schedule; test restoration.
 
-### 13.4 Adding a new analyzer (safe registration)
+### 15.4 Adding a new analyzer (safe registration)
 
 Analyzers live in `engine/analyzers/`. Only offline-safe analyzers are registered by
 default (in `api_gateway/main.py::create_app`). To add one:
@@ -439,7 +530,7 @@ default (in `api_gateway/main.py::create_app`). To add one:
 4. Run `python tests\integration\test_api.py`; confirm a phishing input reaches the
    desired verdict and a benign input stays low.
 
-### 13.5 Adding a new API endpoint
+### 15.5 Adding a new API endpoint
 
 In `api_gateway/main.py::create_app`:
 1. Add the route with an RBAC dependency:
@@ -449,7 +540,7 @@ In `api_gateway/main.py::create_app`:
 3. If it's a long action, consider the async job pattern (`/scan/async` + `/scan/jobs/{id}`).
 4. Add a coverage assertion to `tests/integration/test_api.py`.
 
-### 13.6 Authentication & tenants
+### 15.6 Authentication & tenants
 
 - Open mode → API-key mode → JWT+RBAC mode, resolved by `AuthGuardMiddleware`.
 - Roles: `admin` (all), `analyst` (write ops), `viewer` (read-only). Enforced per route
@@ -459,20 +550,20 @@ In `api_gateway/main.py::create_app`:
 - Never hardcode secrets. In staging/production, staging a real `SECRET_KEY` is enforced
   at startup.
 
-### 13.7 Async scans
+### 15.7 Async scans
 
 `POST /scan/async` returns a durable job (`pending → running → completed | failed`).
 Poll `GET /scan/jobs/{id}` or subscribe to SSE at `GET /scan/jobs/{id}/events`. Jobs
 survive restarts (SQLAlchemy `scan_jobs` table). For scale-out across machines, move the
 executor to Celery + Redis (scaffold exists in `messaging/`) and keep the same job table.
 
-### 13.8 Audit trail
+### 15.8 Audit trail
 
 Every privileged action writes an immutable record (`user, action, target, timestamp,
 IP`) via `storage/audit.py`; read it with `GET /audit`. There is deliberately no
 update/delete path. Export it periodically for compliance.
 
-### 13.9 Common troubleshooting
+### 15.9 Common troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -484,7 +575,7 @@ update/delete path. Export it periodically for compliance.
 | Threat-intel providers unreachable | Missing/expired provider keys; the pipeline skips them gracefully. |
 | CPU-bound analyzer returns FAILED with a pickle error | Resolved: `ConstrainedMetadata` is now picklable so the ProcessPoolExecutor dispatch works. If a new CPU-bound analyzer fails, check it has no unpicklable members. |
 
-### 13.10 Release checklist
+### 15.10 Release checklist
 
 1. `python -m compileall -q <source dirs>` — no errors.
 2. `python tests\integration\test_api.py` — all checks pass.
