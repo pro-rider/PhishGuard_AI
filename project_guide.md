@@ -103,8 +103,9 @@ PhishGuard_AI/
 ├── policy/               # Policy & risk thresholds, tenant policy
 ├── quarantine/           # Email quarantine (encrypted at rest), release & retention
 ├── case_management/      # Incident cases, comments, evidence, workflow
-├── security/             # SSRF guard, etc.
-├── storage/              # Encryption (AES-GCM keyring), object storage, redis client
+├── security/             # SSRF guard; identity.py (JWT/Principal/PBKDF2), rbac.py (require_roles)
+├── storage/              # persistence (SQLite fallback), database.py (engine), models.py (ORM),
+│                         # repository.py (SqlAlchemyStore), scan_jobs.py, audit.py, encryption (AES-GCM)
 ├── observability/        # Alerting, metrics, tracing
 ├── messaging/            # Celery app
 ├── reputation/           # Threat-intel reputation (ip, hash)
@@ -114,7 +115,8 @@ PhishGuard_AI/
 ├── core/                 # Bootstrap & root config
 ├── frontend/             # Operator dashboard (single-file HTML)
 ├── config/internal/      # Hardened settings (pydantic-settings)
-├── tests/                # Unit tests
+├── tests/                # Unit tests + tests/integration/test_api.py (API integration suite)
+├── migrations/           # Alembic migration scripts (+ alembic.ini at root)
 ├── docker/               # API / sandbox / worker Dockerfiles + compose
 ├── run_server.ps1        # Dev launcher (open mode)
 └── requirements*.txt
@@ -271,3 +273,138 @@ git push origin main
 ```
 
 Repo: `https://github.com/pro-rider/PhishGuard_AI`
+
+---
+
+## 13. Maintenance & Operations Guide
+
+How to keep PhishGuard_AI running, upgrading, and safe. Read this before changing
+schema, auth, analyzers, or endpoints.
+
+### 13.1 Daily operations (quick reference)
+
+```powershell
+# Run the dev server (open mode, hot-reload, :8000)
+cd C:\Users\Administrator\Desktop\PhishGuard_AI
+.\run_server.ps1
+
+# Run the API integration suite (throwaway SQLite DB)
+python tests\integration\test_api.py
+
+# Syntax gate over all source
+python -m compileall -q api_gateway config case_management quarantine storage engine security tests
+
+# Apply database migrations (see 13.3)
+python -m alembic upgrade head
+```
+
+Key URLs: dashboard `/` · API docs `/docs` · health `/health` · readiness `/ready`
+(check actually queries the DB).
+
+### 13.2 Runtime configuration
+
+Settings live in `config/internal/settings.py` (pydantic-settings). Override with
+environment variables or `.env`. The most important knobs:
+
+| Env / field | Effect |
+|---|---|
+| `AUTH_USERS` | Enable JWT + RBAC (`username:password:roles:tenant;…`). Open mode when unset. |
+| `API_KEYS` | Enable API-key mode (`key` or `key\|role1,role2\|tenant`). |
+| `SECRET_KEY` | JWT signing secret (≥32 chars; required in staging/production). |
+| `PHISHGUARD_DB` | SQLite DB file path. |
+| `SQLALCHEMY_DATABASE_URI` | Switch persistence to PostgreSQL (app + migrations auto-target it). |
+| `VIRUSTOTAL_API_KEY` etc. | Threat-intel providers. |
+| `ALLOW_*_ACCESS`, `ENFORCE_SSRF_PROTECTION` | Outbound SSRF guard. |
+
+### 13.3 Database maintenance
+
+**Default (SQLite)** — no setup. DB file: `storage/data/phishguard.db` (gitignored).
+Stop the server before deleting it to start clean.
+
+**Switch to PostgreSQL (production):**
+1. Install the driver for your Python: `pip install "psycopg[binary]"`.
+2. Set `SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://user:pass@host:5432/db`.
+3. `python -m alembic upgrade head` once.
+
+**Schema migrations (Alembic):**
+```powershell
+# 1) Create a migration after editing storage/models.py:
+python -m alembic revision --autogenerate -m "describe the change"
+# 2) Review migrations/versions/<new>.py, then apply:
+python -m alembic upgrade head
+# Rollback one step: python -m alembic downgrade -1
+```
+- All durable tables share the `(id TEXT PK, data TEXT JSON)` layout in `storage/models.py`.
+- `storage/repository.py::SqlAlchemyStore` is the single write-through/load adapter the
+  managers use; keep its interface stable when adding tables.
+
+**Backups:** the SQLite file is the whole data set — back it up (or the Postgres DB +
+object storage) on a schedule; test restoration.
+
+### 13.4 Adding a new analyzer (safe registration)
+
+Analyzers live in `engine/analyzers/`. Only offline-safe analyzers are registered by
+default (in `api_gateway/main.py::create_app`). To add one:
+1. Implement the analyzer in its module (mirror an existing one's interface).
+2. Import + instantiate it and add it to the `for analyzer in ( ... )` registration tuple.
+3. **Graceful degradation:** if it needs an external engine (browser, live DNS/SSL, YARA
+   rulesets, threat-intel) that may be absent, guard its import/init in a try/except and
+   `logger.warning(...)` + skip, so it can never fail the whole scan.
+4. Run `python tests\integration\test_api.py`; confirm a phishing input reaches the
+   desired verdict and a benign input stays low.
+
+### 13.5 Adding a new API endpoint
+
+In `api_gateway/main.py::create_app`:
+1. Add the route with an RBAC dependency:
+   `@app.post("/x", dependencies=[Depends(require_roles("admin", "analyst"))])`
+   (reads allow `admin, analyst, viewer`).
+2. Attach the audit hook: `_record_audit(request, "x.create", "x", id, {...})`.
+3. If it's a long action, consider the async job pattern (`/scan/async` + `/scan/jobs/{id}`).
+4. Add a coverage assertion to `tests/integration/test_api.py`.
+
+### 13.6 Authentication & tenants
+
+- Open mode → API-key mode → JWT+RBAC mode, resolved by `AuthGuardMiddleware`.
+- Roles: `admin` (all), `analyst` (write ops), `viewer` (read-only). Enforced per route
+  via `security/rbac.py::require_roles`.
+- Tenant scope comes from the principal (JWT/API key) and is enforced by
+  `TenantIsolationMiddleware`; data is always listed/scoped by `request.state.tenant_id`.
+- Never hardcode secrets. In staging/production, staging a real `SECRET_KEY` is enforced
+  at startup.
+
+### 13.7 Async scans
+
+`POST /scan/async` returns a durable job (`pending → running → completed | failed`).
+Poll `GET /scan/jobs/{id}` or subscribe to SSE at `GET /scan/jobs/{id}/events`. Jobs
+survive restarts (SQLAlchemy `scan_jobs` table). For scale-out across machines, move the
+executor to Celery + Redis (scaffold exists in `messaging/`) and keep the same job table.
+
+### 13.8 Audit trail
+
+Every privileged action writes an immutable record (`user, action, target, timestamp,
+IP`) via `storage/audit.py`; read it with `GET /audit`. There is deliberately no
+update/delete path. Export it periodically for compliance.
+
+### 13.9 Common troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `401 unauthorized` on `/scan` | Server in enforced mode; add a valid `X-API-Key` or `Authorization: Bearer <token>`. |
+| `403 insufficient permissions` | Caller's role can't write; use an `analyst`/`admin` token. |
+| DB file locked on delete | The server holds it; stop `run_server.ps1` first. |
+| `alembic upgrade` no-op | Tables already exist via `init_db`; that's expected. |
+| Port 8000 in use | Stop the other process or change `PORT`. |
+| Threat-intel providers unreachable | Missing/expired provider keys; the pipeline skips them gracefully. |
+
+### 13.10 Release checklist
+
+1. `python -m compileall -q <source dirs>` — no errors.
+2. `python tests\integration\test_api.py` — all checks pass.
+3. If schema changed: `python -m alembic upgrade head` against a copy, then production.
+4. Confirm open mode + a JWT path both work.
+5. `git add -A; git commit -m "…"; git push origin main`.
+
+---
+
+
