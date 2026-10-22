@@ -12,6 +12,7 @@ venv/
 .venv/
 env/
 .env/
+.env
 
 # Keep the example, ignore real env files
 !.env.example
