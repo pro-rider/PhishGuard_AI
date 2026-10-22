@@ -58,6 +58,9 @@ _CREDENTIAL_BAIT_TERMS = (
     "enter your credentials", "click to verify", "re-enter your password",
     "unlock your account", "reset your password", "verify identity",
     "account has been suspended", "confirm your identity",
+    "verify your account", "verify your account now", "verify your email",
+    "click here to verify", "account verification", "confirm your account",
+    "validate your account", "account will be locked",
 )
 _PRESSURE_TERMS = (
     "failure to respond", "will result in", "legal action", "lawsuit",
