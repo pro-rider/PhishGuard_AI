@@ -337,6 +337,12 @@ class Settings(BaseSettings):
         description="Semicolon-separated user registry enabling JWT + RBAC.",
     )
 
+    # Extra offline analyzers (e.g. url_parser) that add structural signals but
+    # change aggregation. Keep OFF by default until verdict baselines are
+    # re-verified for your corpus. Enabling is safe (graceful degradation), but
+    # re-baseline phishing vs benign verdicts before promoting to production.
+    ENABLE_EXTRA_ANALYZERS: bool = False
+
     # ========================================================================
     # SSRF / OUTBOUND NETWORK SECURITY
     # ========================================================================

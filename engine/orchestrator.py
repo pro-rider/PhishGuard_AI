@@ -248,6 +248,12 @@ class ConstrainedMetadata:
     def data(self) -> Mapping[str, Union[str, int, float, bool]]:
         return self._data
 
+    def __reduce__(self) -> Tuple:
+        # MappingProxyType is unpicklable, which breaks the CPU-bound
+        # ProcessPoolExecutor dispatch (it pickles the whole ScanContext).
+        # Reconstruct from a plain dict so immutable metadata round-trips safely.
+        return (self.__class__, (dict(self._data),))
+
 
 @dataclass(frozen=True, slots=True)
 class ScanContext:

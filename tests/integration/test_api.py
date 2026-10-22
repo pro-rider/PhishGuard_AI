@@ -63,9 +63,17 @@ def main() -> int:
     vr = c.post("/auth/token", json={"username": "viewer", "password": "view123"})
     viewer_h = {"Authorization": f"Bearer {vr.json()['access_token']}"}
 
-    # 3. Sync scan + audit hook.
+    # 3. Sync scan + audit hook + explainability signals.
     s = c.post("/scan", json={"email_text": PHISHING_TEXT}, headers=admin_h)
     check("sync_scan", s.status_code == 200 and "scan_id" in s.json(), str(s.json()))
+    sig = s.json().get("signals", [])
+    check(
+        "scan_has_signals",
+        isinstance(sig, list) and all(
+            {"analyzer", "score", "confidence", "findings"} <= set(x) for x in sig
+        ),
+        str(sig)[:200],
+    )
 
     # 4. Async job lifecycle.
     a = c.post("/scan/async", json={"email_text": PHISHING_TEXT}, headers=admin_h)
@@ -95,6 +103,21 @@ def main() -> int:
     aud = c.get("/audit", headers=admin_h)
     actions = [x["action"] for x in aud.json()]
     check("audit_present", aud.status_code == 200 and len(actions) >= 3, str(actions))
+
+    # 8. Prometheus /metrics renders counters in text format.
+    m = c.get("/metrics")
+    mtext = m.text
+    check("metrics_200", m.status_code == 200, str(m.status_code))
+    check(
+        "metrics_text_format",
+        m.headers.get("content-type", "").startswith("text/plain"),
+        m.headers.get("content-type", ""),
+    )
+    check(
+        "metrics_has_scan_total",
+        "phishguard_scan_total" in mtext,
+        [ln for ln in mtext.splitlines() if "scan_total" in ln][:2],
+    )
 
     print(f"\n{'='*50}")
     if PASS:

@@ -85,3 +85,12 @@ with status, feasibility, and a practical execution order.
 - (Earlier this session) **JWT + RBAC auth**, SQLite persistence, analyzer enum fixes.
 
 Verified: persistence across restart; Alembic migrations; async job completes + SSE; RBAC 403 for viewer writes; 401 no-creds; open mode still passes; integration suite green.
+
+## Delivered this session (round 3 — observability & detection transparency)
+
+- **Prometheus `/metrics`** — `observability/metrics.py` (existing) now wired into the API. Module-level, idempotent instruments (`_setup_metrics`): `scan_total{verdict}` counter, `scan_latency_seconds` histogram, `scan_jobs_active` gauge, `cases_total{severity}`, `quarantine_total`. `/metrics` serves Prometheus text format (exempt from auth). Scrape with Prometheus/Grafana.
+- **Explainability — top signals** — `/scan` (sync + async) now returns `signals`: the top contributing analyzers with score/confidence and their top findings (`_build_signals`), so analysts see *why* a verdict was reached.
+- **Feature-flagged analyzer registration** — `ENABLE_EXTRA_ANALYZERS` (default **OFF**; graceful try/except) wires `url_parser` in. Because extra analyzers change weighted aggregation, it stays off until verdicts are re-baselined on your corpus.
+- **Fixed latent CPU-pool bug** — `ConstrainedMetadata` stored an unpicklable `MappingProxyType`, so *any* CPU-bound analyzer (routed to the ProcessPoolExecutor) failed with `cannot pickle 'mappingproxy'`. Added `__reduce__` to make immutable metadata picklable — verified `url_parser` (CPU-bound, SSRF/homograph detection) now succeeds through the pool.
+
+Status vs roadmap: items #6 (observability) and #7 (wire analyzers, safely behind a flag) are now partly done; item #8 (Prometheus) done. Remaining: OTel traces, dashboard SSE live tiles, PostgreSQL-in-prod, Vault/KMS, MIME parsing, YARA store, SIEM/SOAR + gateway connectors, dashboard SPA, CI/CD.

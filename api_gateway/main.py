@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTasks
-from starlette.responses import StreamingResponse
+from starlette.responses import Response, StreamingResponse
 
 from api_gateway.middleware.auth_guard import (
     AuthGuardMiddleware,
@@ -38,6 +38,7 @@ from api_gateway.middleware.tenant_isolation import TenantIsolationMiddleware
 from case_management.cases import CaseManager, CaseStatus, SecurityCase
 from case_management.comments import CommentManager
 from case_management.evidence import EvidenceManager, EvidenceKind
+from config.internal.settings import settings
 from engine.analyzers.email.nlp_detector import NLPDetectorAnalyzer
 from engine.analyzers.heuristic_analyzer import HeuristicContentAnalyzer
 from engine.orchestrator import (
@@ -49,6 +50,7 @@ from engine.orchestrator import (
     ScanType,
 )
 from observability.alerting import AlertManager, AlertSeverity, SecurityAlert
+from observability.metrics import metrics
 from quarantine.email_quarantine import (
     EmailQuarantineManager,
     QuarantineStatus,
@@ -180,6 +182,23 @@ def create_app() -> FastAPI:
     ):
         orchestrator.register_analyzer(analyzer)
 
+    # Feature-flagged extra analyzers (default OFF): structural analyzers like
+    # url_parser add strong signals (homograph / SSRF / userinfo / high-entropy)
+    # but change weighted aggregation, so enabling requires re-baselining verdicts.
+    # Registration is guarded so a broken analyzer can never fail the scan.
+    if getattr(settings, "ENABLE_EXTRA_ANALYZERS", False):
+        try:
+            from engine.analyzers.url.url_parser import URLParser
+
+            orchestrator.register_analyzer(URLParser())
+            logger.info("Extra analyzer registered: url_parser")
+        except Exception as exc:  # noqa: BLE001 - graceful degradation
+            logger.warning("Extra analyzer url_parser not registered: %s", exc)
+
+    # Prometheus metric instruments (registered once, module-level).
+    _setup_metrics()
+
+
     case_manager = CaseManager(db_path=DB_PATH)
     comment_manager = CommentManager()
     evidence_manager = EvidenceManager()
@@ -227,6 +246,13 @@ def create_app() -> FastAPI:
             db_ok = False
             logger.warning("readiness probe: db check failed: %s", exc)
         return {"status": "ready" if db_ok else "degraded", "db": "ok" if db_ok else "error"}
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics_endpoint() -> Response:
+        """Prometheus text-format metrics for scraping (exempt from auth)."""
+        return Response(
+            metrics.render(), media_type="text/plain; version=0.0.4"
+        )
 
     # ------------------------------------------------------------------
     # Audit helper (immutable trail; must never break the request)
@@ -313,8 +339,9 @@ def create_app() -> FastAPI:
             result["scan_id"],
             {"verdict": result["verdict"], "score": result["overall_score"]},
         )
+        _scan_total(verdict=result.get("verdict", "unknown"))
+        _scan_latency(value=max(result.get("total_execution_time_ms", 0) / 1000.0, 0.0))
         return result
-
     # ------------------------------------------------------------------
     # Async detection (long-running scans): job + status + SSE events
     # ------------------------------------------------------------------
@@ -449,6 +476,7 @@ def create_app() -> FastAPI:
             severity=payload.severity,
             assignee=payload.assignee,
         )
+        _cases_total(severity=str(case.severity.value if hasattr(case.severity, "value") else case.severity))
         _record_audit(
             request,
             "case.create",
@@ -494,6 +522,7 @@ def create_app() -> FastAPI:
             raw_body=payload.body.encode("utf-8"),
             risk_score=payload.risk_score,
         )
+        _quarantine_total()
         _record_audit(
             request,
             "quarantine.create",
@@ -559,8 +588,43 @@ def _build_email_payload(
     )
 
 
-async def _run_detection(
-    orchestrator: DetectionOrchestrator,
+def _build_signals(result: "PipelineResult") -> List[Dict[str, object]]:
+    """Derive the top contributing signals from per-analyzer results (explainability).
+
+    Returns a short, human-readable list of what most drove the verdict, so an
+    analyst can understand *why* a scan was flagged without reading every rule.
+    """
+    signals: List[Dict[str, object]] = []
+    for name, ar in (result.analyzer_results or {}).items():
+        score = getattr(ar, "score_contribution", 0.0) or 0.0
+        if score <= 0:
+            continue
+        confidence = getattr(ar, "confidence", 0.0) or 0.0
+        findings = getattr(ar, "findings", None) or []
+        top_findings: List[Dict[str, str]] = []
+        for f in list(findings)[:3]:
+            sev = getattr(f, "severity", None)
+            sev = sev.value if hasattr(sev, "value") else (sev or "unknown")
+            top_findings.append(
+                {
+                    "rule_id": getattr(f, "rule_id", "") or "",
+                    "severity": str(sev),
+                    "message": (getattr(f, "message", "") or "")[:200],
+                }
+            )
+        signals.append(
+            {
+                "analyzer": name,
+                "score": round(float(score), 2),
+                "confidence": round(float(confidence), 3),
+                "findings": top_findings,
+            }
+        )
+    signals.sort(key=lambda s: float(s["score"]), reverse=True)
+    return signals[:5]
+
+
+async def _run_detection(    orchestrator: DetectionOrchestrator,
     case_manager: CaseManager,
     payload: ScanRequest,
     tenant_id: str,
@@ -600,11 +664,55 @@ async def _run_detection(
         "confidence_score": result.confidence_score,
         "verdict": result.verdict.value,
         "case_created": result.is_malicious,
+        "signals": _build_signals(result),
     }
 
 
-async def _run_scan_job(
-    *,
+# ============================================================================
+# PROMETHEUS INSTRUMENTATION (module-level so create_app and job executors share)
+# ============================================================================
+
+_METRICS_READY = False
+_scan_total = None
+_scan_latency = None
+_scan_jobs_active = None
+_cases_total = None
+_quarantine_total = None
+
+
+def _setup_metrics() -> None:
+    """Register Prometheus instruments once (idempotent across app factory calls)."""
+    global _METRICS_READY, _scan_total, _scan_latency
+    global _scan_jobs_active, _cases_total, _quarantine_total
+    if _METRICS_READY:
+        return
+    _scan_total = metrics.counter("scan_total", "Scans completed by verdict", ("verdict",))
+    _scan_latency = metrics.histogram(
+        "scan_latency_seconds",
+        "Scan execution time (seconds)",
+        buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 15.0),
+    )
+    _scan_jobs_active = metrics.gauge("scan_jobs_active", "Async scan jobs currently running")
+    _cases_total = metrics.counter("cases_total", "Cases created", ("severity",))
+    _quarantine_total = metrics.counter("quarantine_total", "Messages quarantined")
+    _METRICS_READY = True
+
+
+def _refresh_active_jobs(job_manager: ScanJobManager) -> None:
+    """Recompute the running-jobs gauge from durable job state."""
+    try:
+        running = sum(
+            1
+            for j in (job_manager.list() or [])
+            if (j or {}).get("status") == "running"
+        )
+        if _scan_jobs_active is not None:
+            _scan_jobs_active(value=float(running))
+    except Exception:  # noqa: BLE001 - instrumentation is fail-open
+        pass
+
+
+async def _run_scan_job(    *,
     job_manager: ScanJobManager,
     orchestrator: DetectionOrchestrator,
     case_manager: CaseManager,
@@ -619,14 +727,18 @@ async def _run_scan_job(
     """Background executor for an async scan job (queued via BackgroundTasks)."""
     try:
         job_manager.start(job_id)
+        _refresh_active_jobs(job_manager)
         job_manager.append_event(job_id, "started", "scan started")
         result = await _run_detection(
             orchestrator, case_manager, payload, tenant_id, correlation_id
         )
         job_manager.complete(job_id, result)
+        _refresh_active_jobs(job_manager)
         job_manager.append_event(
             job_id, "completed", f"verdict={result['verdict']}"
         )
+        _scan_total(verdict=result.get("verdict", "unknown"))
+        _scan_latency(value=max(result.get("total_execution_time_ms", 0) / 1000.0, 0.0))
         audit_manager.record(
             tenant_id=tenant_id,
             actor=actor,
@@ -639,6 +751,7 @@ async def _run_scan_job(
     except Exception as exc:  # noqa: BLE001 - mark the job failed, keep the API alive
         logger.exception("async scan job %s failed", job_id)
         job_manager.fail(job_id, str(exc))
+        _refresh_active_jobs(job_manager)
         job_manager.append_event(job_id, "failed", str(exc)[:4000])
         try:
             audit_manager.record(

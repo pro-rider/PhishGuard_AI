@@ -159,11 +159,21 @@ Response:
   "total_execution_time_ms": 0.01,
   "overall_score": 0.0,
   "confidence_score": 1.0,
-  "verdict": "INFORMATIONAL"
+  "verdict": "INFORMATIONAL",
+  "signals": [
+    {
+      "analyzer": "heuristic_analyzer",
+      "score": 45.0,
+      "confidence": 0.617,
+      "findings": [{"rule_id": "email.urgency", "severity": "MEDIUM", "message": "..."}]
+    }
+  ]
 }
 ```
 
-`verdict` ∈ `INFORMATIONAL | LOW | MEDIUM | HIGH | CRITICAL`.
+`verdict` ∈ `INFORMATIONAL | LOW | MEDIUM | HIGH | CRITICAL`. `signals` is the
+**explainability** output — the top contributing analyzers and their findings, so an
+analyst can see *why* a verdict was reached (also present in async job results).
 
 ### `POST /scan/async`
 Submit a long-running scan. Returns a **durable job** immediately (`202`-style payload):
@@ -191,6 +201,11 @@ Read the immutable audit trail (who did what, when, from which IP).
 
 ### `GET /ready`
 Readiness probe that actually checks the durable store: `{ "status": "ready", "db": "ok" }`.
+
+### `GET /metrics`
+Prometheus text-format metrics for scraping (exempt from auth): `scan_total{verdict}`,
+`scan_latency_seconds` histogram, `scan_jobs_active`, `cases_total{severity}`,
+`quarantine_total`. Point Prometheus/Grafana at this endpoint.
 
 ### `POST /cases`
 Create an incident case. Body: `{ "title", "description", "severity", "assignee" }`.
@@ -315,6 +330,7 @@ environment variables or `.env`. The most important knobs:
 | `SQLALCHEMY_DATABASE_URI` | Switch persistence to PostgreSQL (app + migrations auto-target it). |
 | `VIRUSTOTAL_API_KEY` etc. | Threat-intel providers. |
 | `ALLOW_*_ACCESS`, `ENFORCE_SSRF_PROTECTION` | Outbound SSRF guard. |
+| `ENABLE_EXTRA_ANALYZERS` | Default `False`. Registers extra offline analyzers (e.g. `url_parser`) that change weighted aggregation — enable only after re-baselining verdicts on your corpus. |
 
 ### 13.3 Database maintenance
 
@@ -396,6 +412,7 @@ update/delete path. Export it periodically for compliance.
 | `alembic upgrade` no-op | Tables already exist via `init_db`; that's expected. |
 | Port 8000 in use | Stop the other process or change `PORT`. |
 | Threat-intel providers unreachable | Missing/expired provider keys; the pipeline skips them gracefully. |
+| CPU-bound analyzer returns FAILED with a pickle error | Resolved: `ConstrainedMetadata` is now picklable so the ProcessPoolExecutor dispatch works. If a new CPU-bound analyzer fails, check it has no unpicklable members. |
 
 ### 13.10 Release checklist
 
